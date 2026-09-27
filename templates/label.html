@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="hu">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Címke előnézet</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Címke előnézet</p>
+        </div>
+
+        <div class="online">
+            <span></span>
+            ONLINE
+        </div>
+    </header>
+
+
+    <section class="print-card">
+
+        <p class="section-label">
+            CÍMKE ELŐNÉZET
+        </p>
+
+        <h2>{{ quantity }} db címke</h2>
+
+
+        <div class="label-preview">
+
+            <img
+                src="{{ url_for('static', filename='qr/' + qr_filename) }}"
+                alt="DPP QR-kód"
+            >
+
+            <div class="label-prn">
+                {{ print_id }}
+            </div>
+
+        </div>
+
+
+        <a href="/" class="new-print-button">
+            Új nyomtatás
+        </a>
+
+    </section>
+
+</div>
+
+</body>
+
+</html>

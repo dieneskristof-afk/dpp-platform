@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Nyomtatás ellenőrzése</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Nyomtatás ellenőrzése</p>
+        </div>
+
+        <div class="online">
+            <span></span>
+            ONLINE
+        </div>
+
+    </header>
+
+
+    <section class="print-card">
+
+        <p class="section-label">
+            NYOMTATÁS ELLENŐRZÉSE
+        </p>
+
+        <h2>{{ product["product_name"] }}</h2>
+
+
+        <div class="product-info">
+
+            <div>
+                <span>Termékcsoport</span>
+
+                <strong>{{ product["category_name"] }}</strong>
+            </div>
+
+
+            <div>
+                <span>DPP státusz</span>
+                <strong class="active-status">
+                    ● AKTÍV
+                </strong>
+            </div>
+
+        </div>
+
+
+        <div class="date-grid">
+
+            <div class="readonly-field">
+                <span>Dátum</span>
+                <strong>{{ date }}</strong>
+            </div>
+
+            <div class="readonly-field">
+                <span>Nyomtatási idő</span>
+                <strong>{{ time }}</strong>
+            </div>
+
+        </div>
+
+
+        <div class="print-summary">
+
+            <span>Nyomtatandó címkék</span>
+
+            <strong>
+                {{ quantity }} db
+            </strong>
+
+        </div>
+
+
+
+<form action="/execute-print" method="POST">
+
+    <input
+        type="hidden"
+        name="product_id"
+        value="{{ product['product_id'] }}"
+    >
+
+    <input
+        type="hidden"
+        name="quantity"
+        value="{{ quantity }}"
+    >
+
+    <button
+        class="dpp-button"
+        type="submit"
+    >
+        {{ quantity }} DPP CÍMKE NYOMTATÁSA
+    </button>
+
+</form>
+
+
+        <button
+            class="cancel-button"
+            onclick="history.back()"
+        >
+            Vissza
+        </button>
+
+    </section>
+
+</div>
+
+</body>
+</html>

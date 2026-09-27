@@ -1,0 +1,7 @@
+company_id,product_id,category_code,category_name,product_name,dpp_id,qr_file,sku,active
+HU-DEMO-001,PRD-000001,Térkő,Térkövek,Prémium térkő 6 cm – Szürke,PAVER-PREMIUM-6-GREY,PAVER-PREMIUM-6-GREY.png,,1
+HU-DEMO-001,PRD-000002,Térkő,Térkövek,Prémium térkő 8 cm – Antracit,PAVER-PREMIUM-8-ANTHRACITE,PAVER-PREMIUM-8-ANTHRACITE.png,,1
+HU-DEMO-001,PRD-000003,Térkő,Térkövek,City térkő 6 cm – Barna,PAVER-CITY-6-BROWN,PAVER-CITY-6-BROWN.png,,1
+HU-DEMO-001,PRD-000004,Szegély,Szegélykövek,Kerti szegélykő,KERB-GARDEN-001,KERB-GARDEN-001.png,,1
+HU-DEMO-001,PRD-000005,Szegély,Szegélykövek,Útszegélykő,KERB-ROAD-001,KERB-ROAD-001.png,,1
+HU-DEMO-001,PRD-000006,Szegély,Szegélykövek,Süllyesztett szegélykő,KERB-LOWERED-001,KERB-LOWERED-001.png,,1

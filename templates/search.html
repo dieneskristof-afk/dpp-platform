@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="hu">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>PRN keresés</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Nyomtatási azonosító keresése</p>
+        </div>
+
+        <div class="online">
+            <span></span>
+            ONLINE
+        </div>
+
+    </header>
+
+
+    <section class="print-card">
+
+        <a href="/" class="back-link">
+            ← Vissza a főoldalra
+        </a>
+
+        <p class="section-label">
+            PRN KERESÉS
+        </p>
+
+        <h2>Nyomtatási esemény visszakeresése</h2>
+
+
+        <form method="POST">
+
+            <div class="form-group">
+
+                <label for="print_id">
+                    PRN azonosító
+                </label>
+
+                <input
+                    type="text"
+                    id="print_id"
+                    name="print_id"
+                    placeholder="PRN-20260927-135743-5BD1"
+                    required
+                >
+
+            </div>
+
+            <button
+                type="submit"
+                class="dpp-button"
+            >
+                KERESÉS
+            </button>
+
+        </form>
+
+
+        {% if result %}
+
+        <div class="search-result">
+
+            <p class="section-label">
+                TALÁLAT
+            </p>
+
+            <h2>{{ result["print_id"] }}</h2>
+
+            <div class="search-grid">
+
+                <div>
+                    <span>Termék</span>
+                    <strong>
+                        {% if result["current_product_name"] %}
+                            {{ result["current_product_name"] }}
+                        {% else %}
+                            {{ result["product"] }}
+                        {% endif %}
+                    </strong>
+                </div>
+                <div>
+                    <span>Termékazonosító</span>
+                    <strong>
+                        {% if result["product_id"] %}
+                            {{ result["product_id"] }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </strong>
+                </div>
+                <div>
+                    <span>Nyomtatott mennyiség</span>
+                    <strong>{{ result["quantity"] }} db</strong>
+                </div>
+
+                <div>
+                    <span>Nyomtatás időpontja</span>
+                    <strong>{{ result["printed_at"] }}</strong>
+                </div>
+
+                <div>
+                    <span>Felhasználó</span>
+
+                    <strong>
+                        {% if result["employee_id"] %}
+                            {{ result["employee_id"] }}
+
+                            {% if result["employee_name"] %}
+                                · {{ result["employee_name"] }}
+                            {% endif %}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </strong>
+                </div>
+
+                <div>
+                    <span>Gyártó</span>
+                    <strong>{{ result["company"] }}</strong>
+                </div>
+
+                <div>
+                    <span>Státusz</span>
+                    <strong class="active-status">
+                        {{ result["status"] }}
+                    </strong>
+                </div>
+
+            </div>
+            <a
+                href="{{ url_for('reprint', print_id=result['print_id']) }}"
+                class="dpp-button"
+                style="display: block; text-align: center; text-decoration: none; margin-top: 25px;"
+            >
+                ÚJRANYOMTATÁS
+            </a>
+        </div>
+
+
+        {% elif searched %}
+
+        <div class="search-not-found">
+            Nincs ilyen PRN azonosító az adatbázisban.
+        </div>
+
+        {% endif %}
+
+        <hr style="margin: 40px 0;">
+
+<p class="section-label">
+    NYOMTATÁSI ELŐZMÉNYEK
+</p>
+
+<h2>Utolsó nyomtatások</h2>
+
+{% if history %}
+
+<div class="search-grid">
+
+    {% for log in history %}
+
+<a
+    href="{{ url_for('search_print', print_id=log['print_id']) }}"
+    style="text-decoration: none; color: inherit;"
+>
+    <div>
+        <span>{{ log["printed_at"] }}</span>
+
+        <strong>
+            {% if log["current_product_name"] %}
+                {{ log["current_product_name"] }}
+            {% else %}
+                {{ log["product"] }}
+            {% endif %}
+        </strong>
+
+        <span>
+            {{ log["quantity"] }} db
+        </span>
+
+        <strong>
+            {{ log["print_id"] }}
+        </strong>
+    </div>
+</a>
+    {% endfor %}
+
+</div>
+
+{% else %}
+
+<div class="search-not-found">
+    Még nincs nyomtatási előzmény.
+</div>
+
+{% endif %}
+
+    </section>
+
+</div>
+
+</body>
+
+</html>

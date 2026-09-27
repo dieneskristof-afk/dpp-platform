@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="hu">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Újranyomtatás</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Címke újranyomtatása</p>
+        </div>
+
+        <div class="online">
+            <span></span>
+            ONLINE
+        </div>
+
+    </header>
+
+
+    <section class="print-card">
+
+        <a
+            href="{{ url_for('search_print', print_id=original_print['print_id']) }}"
+            class="back-link"
+        >
+            ← Vissza
+        </a>
+
+        <p class="section-label">
+            ÚJRANYOMTATÁS
+        </p>
+
+        <h2>
+            {{ original_print["print_id"] }}
+        </h2>
+
+
+        <div class="search-grid">
+
+            <div>
+                <span>Termék</span>
+
+                <strong>
+                    {% if original_print["current_product_name"] %}
+                        {{ original_print["current_product_name"] }}
+                    {% else %}
+                        {{ original_print["product"] }}
+                    {% endif %}
+                </strong>
+            </div>
+
+
+            <div>
+                <span>Eredetileg nyomtatva</span>
+                <strong>
+                    {{ original_print["quantity"] }} db
+                </strong>
+            </div>
+
+        </div>
+
+
+        <form method="POST">
+
+            <div class="form-group">
+
+                <label for="quantity">
+                    Újranyomtatandó címkék száma
+                </label>
+
+                <input
+                    type="number"
+                    id="quantity"
+                    name="quantity"
+                    value="1"
+                    min="1"
+                    required
+                >
+
+            </div>
+
+
+            <button
+                type="submit"
+                class="dpp-button"
+            >
+                ÚJRANYOMTATÁS
+            </button>
+
+        </form>
+
+    </section>
+
+</div>
+
+</body>
+
+</html>

@@ -1,0 +1,5 @@
+company_id,employee_id,name,pin,active
+HU-DEMO-001,M-0001,Teszt Felhasználó,1234,1
+HU-DEMO-001,M-0002,Teszt Felhasználó 2,1235,1
+HU-DEMO-001,M-0003,Teszt Felhasználó 3,1236,1
+HU-DEMO-001,M-0004,Teszt Felhasználó 4,2222,1

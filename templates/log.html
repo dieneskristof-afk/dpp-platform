@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="hu">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Nyomtatási napló</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Nyomtatási napló</p>
+        </div>
+
+        <div class="online">
+            <span></span>
+            ONLINE
+        </div>
+
+    </header>
+
+
+    <section class="print-card">
+
+        <a href="/" class="back-link">
+            ← Vissza a főoldalra
+        </a>
+
+        <p class="section-label">
+            NYOMTATÁSI ESEMÉNYEK
+        </p>
+
+        <h2>Korábbi nyomtatások</h2>
+
+
+        <div class="log-table-wrapper">
+
+            <table class="log-table">
+
+                <thead>
+
+                    <tr>
+                        <th>Időpont</th>
+                        <th>Termék</th>
+                        <th>Darab</th>
+                        <th>Dolgozó</th>
+                        <th>Azonosító</th>
+                        <th>Státusz</th>
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                {% for log in logs %}
+
+                    <tr>
+
+                        <td>
+                            {{ log["printed_at"] }}
+                        </td>
+
+                        <td>
+                            {% if log["current_product_name"] %}
+                                {{ log["current_product_name"] }}
+                            {% else %}
+                                {{ log["product"] }}
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <strong>
+                                {{ log["quantity"] }} db
+                            </strong>
+                        </td>
+
+                        <td>
+                            {% if log["employee_id"] %}
+                                {{ log["employee_id"] }}
+
+                                {% if log["employee_name"] %}
+                                    · {{ log["employee_name"] }}
+                                {% endif %}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+
+                        <td class="print-id">
+                            {{ log["print_id"] }}
+                        </td>
+
+                        <td>
+                            <span class="log-success">
+                                {{ log["status"] }}
+                            </span>
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+
+        {% if not logs %}
+
+            <div class="empty-log">
+                Még nincs nyomtatási esemény.
+            </div>
+
+        {% endif %}
+
+    </section>
+
+</div>
+
+</body>
+
+</html>

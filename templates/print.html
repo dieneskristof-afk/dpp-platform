@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DPP nyomtatás</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Nyomtatási adatok</p>
+        </div>
+
+        <div class="online">
+            <span></span>
+            ONLINE
+        </div>
+    </header>
+
+
+    <section class="print-card">
+
+        <a href="/" class="back-link">← Vissza a termékválasztáshoz</a>
+
+        <p class="section-label print-section-title">
+            KIVÁLASZTOTT TERMÉK
+        </p>
+
+        <h2>{{ product["product_name"] }}</h2>
+
+        <div class="product-info">
+
+            <div>
+                <span>Termékcsoport</span>
+
+                <strong>{{ product["category_name"] }}</strong>
+            </div>
+
+            <div>
+                <span>DPP státusz</span>
+                <strong class="active-status">● AKTÍV</strong>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <section class="print-card">
+
+        <p class="section-label">NYOMTATÁSI ADATOK</p>
+
+        <h2>DPP címkék előkészítése</h2>
+
+
+        <div class="date-grid">
+
+            <div class="readonly-field">
+                <span>Dátum</span>
+                <strong>{{ date }}</strong>
+            </div>
+
+            <div class="readonly-field">
+                <span>Idő</span>
+                <strong>{{ time }}</strong>
+            </div>
+
+        </div>
+
+
+        <form action="/confirm" method="POST">
+
+            <input
+                type="hidden"
+                name="product_id"
+                value="{{ product['product_id'] }}"
+        >
+
+
+            <div class="form-group">
+
+                <label for="quantity">
+                    Nyomtatási példányszám
+                </label>
+
+                <input
+                    type="number"
+                    id="quantity"
+                    name="quantity"
+                    value="1"
+                    min="1"
+                    max="1000"
+                    required
+                >
+
+            </div>
+
+
+            <button
+                type="submit"
+                class="dpp-button"
+            >
+                DPP NYOMTATÁSA
+            </button>
+
+        </form>
+
+    </section>
+
+</div>
+
+</body>
+</html>

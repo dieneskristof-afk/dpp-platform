@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DPP Factory</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Gyártói munkaállomás</p>
+        </div>
+
+        <div class="header-right">
+
+            <div class="user-info">
+                <strong>{{ employee_id }}</strong>
+                <span>{{ employee_name }}</span>
+
+                <a href="{{ url_for('logout') }}" class="logout-button">
+                    Kijelentkezés
+                </a>
+            </div>
+
+            <div class="online">
+                <span></span>
+                ONLINE
+            </div>
+
+        </div>
+    </header>
+
+
+    <section class="company-card">
+
+        <div>
+            <p class="section-label">CÉG</p>
+            <h2>DEMO Térkő Kft.</h2>
+
+            <div class="company-data">
+                <p><strong>Telephely:</strong> 3527 Miskolc, Gyár utca 1.</p>
+                <p><strong>Gyártóazonosító:</strong> HU-DEMO-001</p>
+            </div>
+        </div>
+
+        <div class="sync-box">
+            <p class="section-label">ADATBÁZIS</p>
+
+            <div class="sync-status">
+                <span></span>
+                Szinkronizálva
+            </div>
+
+            <p class="sync-time">
+                Utolsó szinkronizáció:<br>
+                {{ session.get("last_sync", "—") }}
+            </p>
+
+            <form method="POST" action="{{ url_for('sync') }}">
+                <button type="submit" class="sync-button">
+                    Szinkronizálás
+                </button>
+            </form>
+        </div>
+
+    </section>
+
+
+    <section class="print-card">
+
+        <div class="section-header">
+            <div>
+                <p class="section-label">CÍMKENYOMTATÁS</p>
+                <h2>Termék kiválasztása</h2>
+            </div>
+
+            <a href="/search" class="search-button">
+                KERESÉS
+            </a>
+        </div>
+
+        <div class="form-group">
+            <label for="category">Termékcsoport</label>
+
+            <select id="category">
+                <option value="">Válasszon termékcsoportot</option>
+                <option value="térkő">Térkövek</option>
+                <option value="szegély">Szegélykövek</option>
+            </select>
+        </div>
+
+
+        <div class="form-group">
+            <label for="product">Termék</label>
+
+            <select id="product" disabled>
+                <option>Először válasszon termékcsoportot</option>
+            </select>
+        </div>
+
+
+        <button id="dpp-button" class="dpp-button" disabled>
+            DPP NYOMTATÁS
+        </button>
+
+    </section>
+
+</div>
+
+
+<script>
+
+const products = {{ products_by_category | tojson }};
+
+
+const categorySelect = document.getElementById("category");
+const productSelect = document.getElementById("product");
+const dppButton = document.getElementById("dpp-button");
+
+
+categorySelect.addEventListener("change", function () {
+
+    const category = this.value;
+
+    productSelect.innerHTML = "";
+    dppButton.disabled = true;
+
+
+    if (!category) {
+
+        productSelect.disabled = true;
+
+        const option = document.createElement("option");
+        option.textContent = "Először válasszon termékcsoportot";
+
+        productSelect.appendChild(option);
+
+        return;
+    }
+
+
+    productSelect.disabled = false;
+
+    const firstOption = document.createElement("option");
+
+    firstOption.value = "";
+    firstOption.textContent = "Válasszon terméket";
+
+    productSelect.appendChild(firstOption);
+
+
+    products[category].forEach(function(product) {
+
+        const option = document.createElement("option");
+
+        option.value = product.product_id;
+        option.textContent = product.product_name;
+
+        productSelect.appendChild(option);
+
+    });
+
+});
+
+
+productSelect.addEventListener("change", function () {
+
+    dppButton.disabled = !this.value;
+
+});
+dppButton.addEventListener("click", function () {
+
+    const category = categorySelect.value;
+    const product = productSelect.value;
+
+    if (!category || !product) {
+        return;
+    }
+
+    window.location.href =
+        "/print?product_id=" +
+        encodeURIComponent(product);
+});
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="hu">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>DPP Factory – Belépés</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+        <div>
+            <h1>DPP Factory</h1>
+            <p>Gyártói munkaállomás</p>
+        </div>
+    </header>
+
+
+    <section class="print-card">
+
+        <p class="section-label">
+            DOLGOZÓI BELÉPÉS
+        </p>
+
+        <h2>Bejelentkezés</h2>
+
+
+        <form method="POST">
+
+            <div class="form-group">
+
+                <label for="employee_id">
+                    Dolgozói azonosító
+                </label>
+
+                <input
+                    type="text"
+                    id="employee_id"
+                    name="employee_id"
+                    placeholder="M-0001"
+                    autocomplete="username"
+                    autofocus
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="pin">
+                    PIN-kód
+                </label>
+
+                <input
+                    type="password"
+                    id="pin"
+                    name="pin"
+                    placeholder="••••"
+                    inputmode="numeric"
+                    autocomplete="current-password"
+                    required
+                >
+
+            </div>
+
+
+            {% if error %}
+
+                <div class="search-not-found">
+                    {{ error }}
+                </div>
+
+            {% endif %}
+
+
+            <button
+                type="submit"
+                class="dpp-button"
+            >
+                BEJELENTKEZÉS
+            </button>
+
+        </form>
+
+        <form method="POST" action="{{ url_for('sync_login') }}">
+            <button type="submit" class="sync-button">
+                Szinkronizálás
+            </button>
+        </form>
+
+    </section>
+
+</div>
+
+</body>
+
+</html>
