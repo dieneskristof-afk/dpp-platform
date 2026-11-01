@@ -42,19 +42,20 @@
         <h2>{{ quantity }} db címke</h2>
 
 
-        <div class="label-preview">
-
-            <img
-                src="{{ url_for('static', filename='qr/' + qr_filename) }}"
-                alt="DPP QR-kód"
-            >
-
-            <div class="label-prn">
-                {{ print_id }}
+        {% if serials %}
+            {% for serial in serials %}
+            <div class="label-preview" style="margin-bottom: 16px;">
+                <img src="{{ url_for('static', filename='qr/' + qr_filename) }}" alt="DPP QR-kód">
+                <div class="label-prn">{{ serial }}</div>
             </div>
-
-        </div>
-
+            {% endfor %}
+            <p>Nyomtatási napló azonosítója: {{ print_id }}</p>
+        {% else %}
+            <div class="label-preview">
+                <img src="{{ url_for('static', filename='qr/' + qr_filename) }}" alt="DPP QR-kód">
+                <div class="label-prn">{{ print_id }}</div>
+            </div>
+        {% endif %}
 
         <a href="/" class="new-print-button">
             Új nyomtatás

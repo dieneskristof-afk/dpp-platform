@@ -95,6 +95,16 @@ def init_db():
         if column not in existing_product_cols:
             cursor.execute(f"ALTER TABLE products ADD COLUMN {column} {declaration}")
 
+    # Egyedi akkumulátor-azonosítók: a PRN nyomtatási eseményazonosító változatlan.
+    cursor.execute("""CREATE TABLE IF NOT EXISTS battery_serials (
+        serial TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        print_id TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""")
+    cursor.execute("""CREATE INDEX IF NOT EXISTS idx_battery_serials_print
+        ON battery_serials(print_id)""")
+
     # print_log migráció
     cursor.execute("PRAGMA table_info(print_log)")
     columns = [column[1] for column in cursor.fetchall()]
@@ -767,6 +777,29 @@ def confirm():
 
 
 
+def _is_bat_home_5(product):
+    """Csak a kért akkumulátormodellnél használjuk az új formátumot."""
+    return any(str(product[key] or "").strip().upper() == "BAT-HOME-5"
+               for key in ("product_id", "sku", "dpp_id"))
+
+
+def _allocate_battery_serials(conn, product_id, print_id, quantity, now):
+    """Tranzakcióban kiosztott, modellenként növekvő Factory sorozatszámok."""
+    prefix = "BAT-HOME-5-F-"
+    # Az írási zárolás a hívó BEGIN IMMEDIATE tranzakciójához tartozik.
+    previous = conn.execute(
+        "SELECT serial FROM battery_serials WHERE product_id=? "
+        "ORDER BY serial DESC LIMIT 1", (product_id,)).fetchone()
+    next_number = int(previous[0][len(prefix):]) + 1 if previous else 1
+    if next_number + quantity - 1 > 9999999:
+        raise ValueError("A hétjegyű Factory sorozatszám-tartomány betelt.")
+    serials = [f"{prefix}{number:07d}" for number in range(next_number, next_number + quantity)]
+    conn.executemany(
+        "INSERT INTO battery_serials(serial,product_id,print_id,created_at) VALUES(?,?,?,?)",
+        [(serial, product_id, print_id, now) for serial in serials])
+    return serials
+
+
 @app.route("/execute-print", methods=["POST"])
 def execute_print():
 
@@ -804,10 +837,21 @@ def execute_print():
         + uuid.uuid4().hex[:4].upper()
     )
 
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    try:
+        quantity = int(quantity)
+    except (TypeError, ValueError):
+        return "Hibás darabszám.", 400
+    if quantity < 1 or quantity > 1000:
+        return "A darabszám 1 és 1000 között lehet.", 400
 
-    cursor.execute("""
+    conn = sqlite3.connect(DATABASE, timeout=15)
+    cursor = conn.cursor()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        serials = (_allocate_battery_serials(conn, product["product_id"], print_id,
+                                             quantity, now.strftime("%Y-%m-%d %H:%M:%S"))
+                   if _is_bat_home_5(product) else [])
+        cursor.execute("""
         INSERT INTO print_log (
             print_id,
             product_id,
@@ -826,21 +870,25 @@ def execute_print():
         product["company_id"],
         product["product_name"],
         product["category_name"],
-        int(quantity),
+        quantity,
         session["employee_id"],
         now.strftime("%Y-%m-%d %H:%M:%S"),
         "sikeres"
     ))
-
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except (sqlite3.Error, ValueError) as exc:
+        conn.rollback()
+        return f"A sorozatszám kiosztása nem sikerült: {exc}", 409
+    finally:
+        conn.close()
     _SYNC_WAKE.set()
 
     return render_template(
         "label.html",
         qr_filename=qr_filename,
         print_id=print_id,
-        quantity=int(quantity)
+        quantity=quantity,
+        serials=serials
     )
 
 
@@ -901,6 +949,13 @@ def reprint(print_id):
         if not os.path.exists(qr_path):
             return "A termék QR-kódja nincs letöltve erre az eszközre.", 404
 
+        with sqlite3.connect(DATABASE) as serial_conn:
+            existing_serials = [row[0] for row in serial_conn.execute(
+                "SELECT serial FROM battery_serials WHERE print_id=? ORDER BY serial",
+                (original_print["print_id"],)).fetchall()]
+        if existing_serials and quantity > len(existing_serials):
+            return "Az eredeti sorozatszámok számánál több címke nem nyomtatható újra.", 400
+
         # Újranyomtatás naplózása
         now = datetime.now()
 
@@ -928,11 +983,14 @@ def reprint(print_id):
         conn.close()
         _SYNC_WAKE.set()
 
+        # Akkumulátor esetén kizárólag az eredeti sorozatszámok újranyomtatása.
+        serials = existing_serials[:quantity]
         return render_template(
             "label.html",
             qr_filename=qr_filename,
             print_id=original_print["print_id"],
-            quantity=quantity
+            quantity=quantity,
+            serials=serials
         )
 
     return render_template(
