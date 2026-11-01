@@ -1,3 +1,11 @@
 venv/
 __pycache__/
 *.pyc
+# Gyártói aktiválás, helyi adatbázis és futásidejű fájlok
+.factory_runtime/
+factory_connection.json
+factory_reactivation_required.flag
+dpp_factory.db
+dpp_factory.db-*
+*.db-shm
+*.db-wal

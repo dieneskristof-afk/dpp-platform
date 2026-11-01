@@ -18,7 +18,12 @@ app = Flask(__name__)
 # A Central és a Factory azonos localhost címen is külön cookie-t használ.
 app.config["SESSION_COOKIE_NAME"] = "dinexa_factory_session"
 app.secret_key = os.environ.get("DINEXA_FACTORY_SECRET_KEY", "dpp-demo-secret-key")
-DATABASE = "dpp_factory.db"
+# Gyártófüggetlen telepítés: a futás közbeni adatok NEM a GitHubon tárolt fájlok.
+# A Render ingyenes példányán ez az adatkönyvtár nem tartós: új deploy után
+# ismételt aktiválásra lehet szükség. Tableten később tartós helyi útvonal adható.
+FACTORY_DATA_DIR = Path(os.environ.get("DINEXA_FACTORY_DATA_DIR", str(Path(__file__).resolve().parent / ".factory_runtime")))
+FACTORY_DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATABASE = str(FACTORY_DATA_DIR / "dpp_factory.db")
 
 
 
@@ -197,6 +202,8 @@ def _upload_print_events(config):
 _SYNC_WAKE = threading.Event()
 _SYNC_START_LOCK = threading.Lock()
 _SYNC_STARTED = False
+_DB_INITIALIZED = False
+_DB_INIT_LOCK = threading.Lock()
 _SYNC_INTERVAL = max(15, int(os.environ.get("DINEXA_SYNC_INTERVAL_SECONDS", "60")))
 _SYNC_LOG = logging.getLogger("dinexa.factory.sync")
 
@@ -282,7 +289,13 @@ def _automatic_sync_loop():
 
 
 def _start_automatic_sync():
-    global _SYNC_STARTED
+    global _SYNC_STARTED, _DB_INITIALIZED
+    # Gunicorn alatt a __main__ ág nem fut le: új, üres Render példányon
+    # a helyi SQLite sémáját első kérés előtt létre kell hozni.
+    with _DB_INIT_LOCK:
+        if not _DB_INITIALIZED:
+            init_db()
+            _DB_INITIALIZED = True
     with _SYNC_START_LOCK:
         if _SYNC_STARTED:
             return
@@ -415,7 +428,7 @@ def public_product(dpp_id):
 
 
 # DINEXA Central kapcsolat: az aktiválás és a felhasználók szinkronja.
-FACTORY_CONFIG = Path(__file__).resolve().parent / "factory_connection.json"
+FACTORY_CONFIG = FACTORY_DATA_DIR / "factory_connection.json"
 REACTIVATION_REQUIRED = FACTORY_CONFIG.with_name("factory_reactivation_required.flag")
 # Fejlesztéskor localhost; éles telepítésnél DINEXA_CENTRAL_URL környezeti változó.
 CENTRAL_URL = os.environ.get("DINEXA_CENTRAL_URL", "http://127.0.0.1:5000").strip().rstrip("/")
