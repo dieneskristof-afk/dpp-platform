@@ -94,6 +94,15 @@
 
         {% if sync_message %}<div class="search-not-found">{{ sync_message }}</div>{% endif %}
 
+        <form method="POST" action="{{ url_for('switch_workstation') }}"
+              onsubmit="return confirm('Biztosan új gyártóhoz szeretnéd aktiválni ezt a munkaállomást?');"
+              style="margin-top: 18px;">
+            <button type="submit" class="dpp-button"
+                    style="background:#fff; color:#b42318; border:1px solid #d0d5dd;">
+                Gyártó kijelentkeztetése (ideiglenes)
+            </button>
+        </form>
+
 
     </section>
 
