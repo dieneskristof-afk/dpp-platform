@@ -232,6 +232,8 @@ def _acknowledge_local_dpp_versions(config):
 
 
 def _automatic_sync_once():
+    if REACTIVATION_REQUIRED.exists():
+        return
     config = _factory_connection()
     if not config or not config.get("workstation_token"):
         return
@@ -250,6 +252,8 @@ def _automatic_sync_once():
         _SYNC_LOG.warning("Naplószinkron később újrapróbálva: %s", exc)
     try:
         _sync_factory_users(config)
+        if REACTIVATION_REQUIRED.exists():
+            return
         FACTORY_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
         _record_successful_sync(config)
         # Az ACK külön hálózati művelet; hiba esetén a helyi katalógus érintetlen.
@@ -622,6 +626,25 @@ def login():
             error = str(exc)
     message = session.pop("sync_message", None)
     return render_template("login.html", error=error, sync_message=message)
+
+@app.route("/switch-workstation", methods=["POST"])
+def switch_workstation():
+    """Ideiglenes gyártóváltás: a helyi naplók megőrzésével újraaktiválás."""
+    if "employee_id" not in session:
+        return redirect(url_for("login"))
+    # Más gyártó Centraljába nem kerülhet át feltöltetlen nyomtatási esemény.
+    with sqlite3.connect(DATABASE) as conn:
+        pending_prints = conn.execute("SELECT COUNT(*) FROM print_log WHERE synced=0").fetchone()[0]
+        pending_reprints = conn.execute("SELECT COUNT(*) FROM reprint_log WHERE synced=0").fetchone()[0]
+    if pending_prints or pending_reprints:
+        session["sync_status"] = ("Munkaállomás-váltás nem lehetséges: "
+            f"{pending_prints + pending_reprints} nyomtatási esemény még nincs szinkronizálva. "
+            "Várd meg a Central szinkronizációját, majd próbáld újra.")
+        return redirect(url_for("index"))
+    REACTIVATION_REQUIRED.touch()
+    session.clear()
+    return redirect(url_for("activate_workstation"))
+
 
 @app.route("/logout")
 
