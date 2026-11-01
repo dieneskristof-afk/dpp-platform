@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>DPP Factory – Belépés</title>
+    <title>DINEXA Factory – Belépés</title>
 
     <link
         rel="stylesheet"
@@ -19,7 +19,7 @@
 
     <header>
         <div>
-            <h1>DPP Factory</h1>
+            <div class="dinexa-brand"><img src="{{ url_for('static', filename='images/dinexa-logo.png') }}" alt="DINEXA – Digital Product Intelligence"><span class="dinexa-product-name">Factory</span></div>
             <p>Gyártói munkaállomás</p>
         </div>
     </header>
@@ -28,7 +28,7 @@
     <section class="print-card">
 
         <p class="section-label">
-            DOLGOZÓI BELÉPÉS
+            DINEXA CENTRAL FELHASZNÁLÓI BELÉPÉS
         </p>
 
         <h2>Bejelentkezés</h2>
@@ -39,14 +39,14 @@
             <div class="form-group">
 
                 <label for="employee_id">
-                    Dolgozói azonosító
+                    Felhasználónév
                 </label>
 
                 <input
                     type="text"
-                    id="employee_id"
-                    name="employee_id"
-                    placeholder="M-0001"
+                    id="username"
+                    name="username"
+                    placeholder="pl. Kiss Ernő"
                     autocomplete="username"
                     autofocus
                     required
@@ -58,15 +58,15 @@
             <div class="form-group">
 
                 <label for="pin">
-                    PIN-kód
+                    Jelszó
                 </label>
 
                 <input
                     type="password"
-                    id="pin"
-                    name="pin"
+                    id="password"
+                    name="password"
                     placeholder="••••"
-                    inputmode="numeric"
+                    
                     autocomplete="current-password"
                     required
                 >
@@ -92,16 +92,37 @@
 
         </form>
 
-        <form method="POST" action="{{ url_for('sync_login') }}">
-            <button type="submit" class="sync-button">
-                Szinkronizálás
-            </button>
-        </form>
+        {% if sync_message %}<div class="search-not-found">{{ sync_message }}</div>{% endif %}
+
 
     </section>
 
 </div>
 
+<script>
+// A Factory háttérszinkronja ellenőrzi a Centralt. A megnyitott oldal
+// automatikusan az aktiválásra vált, ha a Central visszavonta a hozzáférést.
+(function () {
+    async function checkActivation() {
+        if (document.hidden) return;
+        try {
+            const response = await fetch({{ url_for('factory_activation_status') | tojson }}, {
+                cache: 'no-store', credentials: 'same-origin'
+            });
+            if (!response.ok) return;
+            const status = await response.json();
+            if (status.reactivation_required) {
+                window.location.replace({{ url_for('activate_workstation') | tojson }});
+            }
+        } catch (error) {
+            // Offline állapotban a helyi alkalmazás tovább használható.
+        }
+    }
+    checkActivation();
+    window.setInterval(checkActivation, 5000);
+    document.addEventListener('visibilitychange', checkActivation);
+})();
+</script>
 </body>
 
 </html>

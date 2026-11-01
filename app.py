@@ -6,9 +6,18 @@ import sqlite3
 import os
 import csv
 import shutil
+import json
+import urllib.request
+import urllib.error
+import threading
+import logging
+import time
+from pathlib import Path
 
 app = Flask(__name__)
-app.secret_key = "dpp-demo-secret-key"
+# A Central és a Factory azonos localhost címen is külön cookie-t használ.
+app.config["SESSION_COOKIE_NAME"] = "dinexa_factory_session"
+app.secret_key = os.environ.get("DINEXA_FACTORY_SECRET_KEY", "dpp-demo-secret-key")
 DATABASE = "dpp_factory.db"
 
 
@@ -19,6 +28,11 @@ DATABASE = "dpp_factory.db"
 def init_db():
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS workstation_sync_state (
+        workstation_code TEXT PRIMARY KEY,
+        last_success TEXT NOT NULL
+    )""")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS print_log (
@@ -72,6 +86,15 @@ def init_db():
         )
     """)
 
+    cursor.execute("""CREATE TABLE IF NOT EXISTS synced_categories (
+        id INTEGER NOT NULL, manufacturer_id INTEGER NOT NULL, name TEXT NOT NULL,
+        parent_id INTEGER, PRIMARY KEY(id,manufacturer_id))""")
+    cursor.execute("PRAGMA table_info(products)")
+    existing_product_cols = {r[1] for r in cursor.fetchall()}
+    for column, declaration in (("central_category_id", "INTEGER"), ("dpp_version", "INTEGER")):
+        if column not in existing_product_cols:
+            cursor.execute(f"ALTER TABLE products ADD COLUMN {column} {declaration}")
+
     # print_log migráció
     cursor.execute("PRAGMA table_info(print_log)")
     columns = [column[1] for column in cursor.fetchall()]
@@ -120,213 +143,162 @@ def init_db():
 
 
 def sync_data():
+    """Legacy compatibility: never mark events synced without Central ACK."""
+    _SYNC_WAKE.set()
+
+
+def _upload_print_events(config):
+    # Csak szerver-visszaigazolas utan jelolunk szinkronizaltnak.
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    # Termékek szinkronizálása
-    with open("products.csv", "r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-
-        for row in reader:
-            cursor.execute("""
-                INSERT INTO products (
-                    company_id,
-                    product_id,
-                    category_code,
-                    category_name,
-                    product_name,
-                    dpp_id,
-                    qr_file,
-                    sku,
-                    active
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(product_id) DO UPDATE SET
-                    company_id = excluded.company_id,
-                    category_code = excluded.category_code,
-                    category_name = excluded.category_name,
-                    product_name = excluded.product_name,
-                    dpp_id = excluded.dpp_id,
-                    qr_file = excluded.qr_file,
-                    sku = excluded.sku,
-                    active = excluded.active
-            """, (
-                row["company_id"],
-                row["product_id"],
-                row["category_code"],
-                row["category_name"],
-                row["product_name"],
-                row["dpp_id"],
-                row["qr_file"],
-                row["sku"] or None,
-                int(row["active"])
-            ))
-
-            # QR-kód szinkronizálása
-            qr_filename = row["qr_file"].strip()
-
-            if qr_filename:
-                source_qr = os.path.join("central_qr", qr_filename)
-                target_qr = os.path.join("static", "qr", qr_filename)
-
-                if os.path.exists(source_qr):
-                    shutil.copy2(source_qr, target_qr)
-
-    # Felhasználók szinkronizálása
-    with open("users.csv", "r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-
-        for row in reader:
-            pin_hash = generate_password_hash(row["pin"])
-
-            cursor.execute("""
-                INSERT INTO users (
-                    employee_id,
-                    name,
-                    active,
-                    pin_hash
-                )
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(employee_id) DO UPDATE SET
-                    name = excluded.name,
-                    active = excluded.active,
-                    pin_hash = excluded.pin_hash
-            """, (
-                row["employee_id"],
-                row["name"],
-                int(row["active"]),
-                pin_hash
-            ))
-
-    # -----------------------------------
-    # EREDETI NYOMTATÁSOK FELTÖLTÉSE
-    # -----------------------------------
-
-    cursor.execute("""
-        SELECT *
-        FROM print_log
-        WHERE synced = 0
-        ORDER BY id ASC
-    """)
-
-    unsynced_logs = cursor.fetchall()
-
-    if unsynced_logs:
-        file_exists = (
-            os.path.exists("central_print_log.csv")
-            and os.path.getsize("central_print_log.csv") > 0
-        )
-
-        with open(
-            "central_print_log.csv",
-            "a",
-            encoding="utf-8-sig",
-            newline=""
-        ) as file:
-
-            fieldnames = [
-                "print_id",
-                "company",
-                "product_id",
-                "product",
-                "category",
-                "quantity",
-                "employee_id",
-                "printed_at",
-                "status"
-            ]
-
-            writer = csv.DictWriter(
-                file,
-                fieldnames=fieldnames
-            )
-
-            if not file_exists:
-                writer.writeheader()
-
-            for log in unsynced_logs:
-                writer.writerow({
-                    "print_id": log["print_id"],
-                    "company": log["company"],
-                    "product_id": log["product_id"],
-                    "product": log["product"],
-                    "category": log["category"],
-                    "quantity": log["quantity"],
-                    "employee_id": log["employee_id"],
-                    "printed_at": log["printed_at"],
-                    "status": log["status"]
-                })
-
-                cursor.execute("""
-                    UPDATE print_log
-                    SET synced = 1
-                    WHERE id = ?
-                """, (log["id"],))
-
-    # -----------------------------------
-    # ÚJRANYOMTATÁSOK FELTÖLTÉSE
-    # -----------------------------------
-
-    cursor.execute("""
-        SELECT *
-        FROM reprint_log
-        WHERE synced = 0
-        ORDER BY id ASC
-    """)
-
-    unsynced_reprints = cursor.fetchall()
-
-    if unsynced_reprints:
-        reprint_file_exists = (
-            os.path.exists("central_reprint_log.csv")
-            and os.path.getsize("central_reprint_log.csv") > 0
-        )
-
-        with open(
-            "central_reprint_log.csv",
-            "a",
-            encoding="utf-8-sig",
-            newline=""
-        ) as file:
-
-            fieldnames = [
-                "print_id",
-                "quantity",
-                "employee_id",
-                "reprinted_at"
-            ]
-
-            writer = csv.DictWriter(
-                file,
-                fieldnames=fieldnames
-            )
-
-            if not reprint_file_exists:
-                writer.writeheader()
-
-            for log in unsynced_reprints:
-                writer.writerow({
-                    "print_id": log["print_id"],
-                    "quantity": log["quantity"],
-                    "employee_id": log["employee_id"],
-                    "reprinted_at": log["reprinted_at"]
-                })
-
-                cursor.execute("""
-                    UPDATE reprint_log
-                    SET synced = 1
-                    WHERE id = ?
-                """, (log["id"],))
-
-    conn.commit()
-    conn.close()
+    try:
+        prints = conn.execute('SELECT * FROM print_log WHERE synced=0 ORDER BY id LIMIT 100').fetchall()
+        reprints = conn.execute('''SELECT r.*, p.product_id, p.product, p.category FROM reprint_log r
+            LEFT JOIN print_log p ON p.print_id=r.print_id WHERE r.synced=0 ORDER BY r.id LIMIT 100''').fetchall()
+        events = []
+        for r in prints:
+            events.append(dict(event_key=f"{config['workstation_code']}:print:{r['id']}", event_type='print',
+                print_id=r['print_id'], product_id=r['product_id'], product_name=r['product'],
+                category=r['category'], username=r['employee_id'], quantity=r['quantity'], occurred_at=r['printed_at']))
+        for r in reprints:
+            events.append(dict(event_key=f"{config['workstation_code']}:reprint:{r['id']}", event_type='reprint',
+                print_id=r['print_id'], product_id=r['product_id'], product_name=r['product'] or 'Ismeretlen termék',
+                category=r['category'], username=r['employee_id'], quantity=r['quantity'], occurred_at=r['reprinted_at']))
+        if not events:
+            return 0
+        result = _central_request(config, '/api/factory/v1/print-events', {'events':events}, authenticated=True)
+        acknowledged = set(result.get('acknowledged', []))
+        if not acknowledged.issubset({e['event_key'] for e in events}):
+            raise ValueError('Hibás szerver-visszaigazolás')
+        with conn:
+            for r in prints:
+                if f"{config['workstation_code']}:print:{r['id']}" in acknowledged:
+                    conn.execute('UPDATE print_log SET synced=1 WHERE id=?', (r['id'],))
+            for r in reprints:
+                if f"{config['workstation_code']}:reprint:{r['id']}" in acknowledged:
+                    conn.execute('UPDATE reprint_log SET synced=1 WHERE id=?', (r['id'],))
+        return len(acknowledged)
+    finally:
+        conn.close()
 
 
+# Automatikus háttérszinkron: a dolgozó semmilyen gombot nem nyom.
+# A napló a helyi SQLite-ban marad addig, amíg a Central vissza nem igazolja.
+_SYNC_WAKE = threading.Event()
+_SYNC_START_LOCK = threading.Lock()
+_SYNC_STARTED = False
+_SYNC_INTERVAL = max(15, int(os.environ.get("DINEXA_SYNC_INTERVAL_SECONDS", "60")))
+_SYNC_LOG = logging.getLogger("dinexa.factory.sync")
 
 
+def _record_successful_sync(config):
+    """Persist the latest successful catalog sync for this workstation."""
+    code = config.get("workstation_code")
+    if not code:
+        return
+    with sqlite3.connect(DATABASE, timeout=10) as db:
+        db.execute("""INSERT INTO workstation_sync_state(workstation_code,last_success)
+            VALUES(?,?) ON CONFLICT(workstation_code) DO UPDATE SET
+            last_success=excluded.last_success""",
+            (code, datetime.now().strftime("%Y.%m.%d. %H:%M:%S")))
 
 
+def _last_successful_sync(config):
+    code = config.get("workstation_code")
+    if not code:
+        return "—"
+    with sqlite3.connect(DATABASE, timeout=10) as db:
+        row = db.execute("SELECT last_success FROM workstation_sync_state WHERE workstation_code=?", (code,)).fetchone()
+    return row[0] if row else "—"
+
+
+def _acknowledge_local_dpp_versions(config):
+    """A Central csak a már helyi SQLite-ba mentett verziókat igazolja vissza."""
+    # A korábban letöltött, de még nem jóváhagyott régi helyi rekordokat
+    # nem jelentjük jóváhagyottként; a helyi működésüket sem tiltjuk.
+    catalog = _central_request(config, '/api/factory/v1/workstations/sync', authenticated=True)
+    allowed = {(int(p["id"]), int(p["latest_dpp_version"])) for p in catalog.get("products", [])
+               if p.get("latest_dpp_version") is not None}
+    with sqlite3.connect(DATABASE) as db:
+        products = [dict(product_id=int(r[0]), version_number=int(r[1]))
+                    for r in db.execute("""SELECT product_id,dpp_version FROM products
+                    WHERE company_id=? AND active=1 AND dpp_version IS NOT NULL""",
+                    (config["manufacturer_code"],)).fetchall()
+                    if (int(r[0]),int(r[1])) in allowed]
+    result = _central_request(config, '/api/factory/v1/dpp-sync-ack',
+                              {'products':products}, authenticated=True)
+    if int(result.get('acknowledged', -1)) != len(products):
+        raise ValueError('A Central nem igazolta vissza az összes DPP-t.')
+
+
+def _automatic_sync_once():
+    config = _factory_connection()
+    if not config or not config.get("workstation_token"):
+        return
+    # A naplófeltöltés független a katalógusletöltéstől: egy QR-hiba nem
+    # akadályozhatja meg a már elkészült nyomtatások továbbítását.
+    try:
+        uploaded_total = 0
+        while True:
+            uploaded = _upload_print_events(config)
+            uploaded_total += uploaded
+            if not uploaded:
+                break
+        if uploaded_total:
+            _SYNC_LOG.warning("Central visszaigazolta a nyomtatási eseményeket: %d", uploaded_total)
+    except (ValueError, KeyError, TypeError, OSError, sqlite3.Error) as exc:
+        _SYNC_LOG.warning("Naplószinkron később újrapróbálva: %s", exc)
+    try:
+        _sync_factory_users(config)
+        FACTORY_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        _record_successful_sync(config)
+        # Az ACK külön hálózati művelet; hiba esetén a helyi katalógus érintetlen.
+        try:
+            _acknowledge_local_dpp_versions(config)
+        except (ValueError, KeyError, TypeError, OSError, sqlite3.Error) as exc:
+            _SYNC_LOG.warning("DPP-visszaigazolás később újrapróbálva: %s", exc)
+    except (ValueError, KeyError, TypeError, OSError, sqlite3.Error) as exc:
+        _SYNC_LOG.warning("Katalógusszinkron később újrapróbálva: %s", exc)
+
+
+def _automatic_sync_loop():
+    while True:
+        try:
+            _automatic_sync_once()
+        except Exception:
+            _SYNC_LOG.exception("Váratlan háttérszinkron-hiba")
+        _SYNC_WAKE.wait(timeout=_SYNC_INTERVAL)
+        _SYNC_WAKE.clear()
+
+
+def _start_automatic_sync():
+    global _SYNC_STARTED
+    with _SYNC_START_LOCK:
+        if _SYNC_STARTED:
+            return
+        _SYNC_STARTED = True
+        threading.Thread(target=_automatic_sync_loop, name="dinexa-factory-sync", daemon=True).start()
+
+
+@app.before_request
+def _ensure_automatic_sync():
+    # A WSGI-kiszolgálóban is induljon, ne csak a python app.py használatakor.
+    _start_automatic_sync()
+    if REACTIVATION_REQUIRED.exists():
+        session.clear()
+        if request.endpoint not in ("activate_workstation", "static"):
+            return redirect(url_for("activate_workstation"))
+
+
+@app.route("/factory/activation-status", methods=["GET"])
+def factory_activation_status():
+    """A böngésző a háttérszinkron által jelzett újraaktiválást ellenőrzi."""
+    from flask import jsonify
+    response = jsonify({"reactivation_required": (
+        REACTIVATION_REQUIRED.exists() or _factory_connection() is None
+    )})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/sync", methods=["POST"])
@@ -335,10 +307,18 @@ def sync():
     if "employee_id" not in session:
         return redirect(url_for("login"))
 
-    sync_data()
-
-    session["last_sync"] = datetime.now().strftime("%Y.%m.%d. %H:%M")
-
+    config = _factory_connection()
+    if not config:
+        return redirect(url_for("activate_workstation"))
+    try:
+        user_count, product_count = _sync_factory_users(config)
+        uploaded_count = _upload_print_events(config)
+        FACTORY_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        _record_successful_sync(config)
+        _acknowledge_local_dpp_versions(config)
+        session["sync_status"] = f"{user_count} felhasználó, {product_count} publikált DPP, {uploaded_count} naplóesemény szinkronizálva"
+    except (ValueError, KeyError, TypeError, OSError, sqlite3.Error) as exc:
+        session["sync_status"] = "Szinkronizáció sikertelen: " + str(exc)
     return redirect(url_for("index"))
 
 
@@ -349,9 +329,9 @@ def sync():
 @app.route("/sync-login", methods=["POST"])
 def sync_login():
 
-    sync_data()
+    _SYNC_WAKE.set()
 
-    session["last_sync"] = datetime.now().strftime("%Y.%m.%d. %H:%M")
+    session["last_sync"] = "Automatikus szinkronizáció folyamatban"
 
     return redirect(url_for("login"))
 
@@ -424,52 +404,224 @@ def public_product(dpp_id):
 
 
 
+# DINEXA Central kapcsolat: az aktiválás és a felhasználók szinkronja.
+FACTORY_CONFIG = Path(__file__).resolve().parent / "factory_connection.json"
+REACTIVATION_REQUIRED = FACTORY_CONFIG.with_name("factory_reactivation_required.flag")
+# Fejlesztéskor localhost; éles telepítésnél DINEXA_CENTRAL_URL környezeti változó.
+CENTRAL_URL = os.environ.get("DINEXA_CENTRAL_URL", "http://127.0.0.1:5000").strip().rstrip("/")
+
+
+def _factory_connection():
+    if not FACTORY_CONFIG.exists():
+        return None
+    try:
+        return json.loads(FACTORY_CONFIG.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+
+
+def _central_request(config, endpoint, payload=None, authenticated=False):
+    base = config["central_url"].rstrip("/")
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {"Accept": "application/json"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    if authenticated:
+        headers["Authorization"] = "Bearer " + config["workstation_token"]
+    req = urllib.request.Request(base + endpoint, data=data, headers=headers,
+                                 method="POST" if data is not None else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            raw = response.read(5_000_000)
+            content_type = response.headers.get("Content-Type", "")
+            try:
+                result = json.loads(raw.decode("utf-8-sig"))
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise ValueError(
+                    f"A Central nem JSON-választ adott ({endpoint}; HTTP {response.status}; "
+                    f"Content-Type: {content_type}; válasz eleje: {raw[:140]!r})"
+                ) from exc
+            if not isinstance(result, dict):
+                raise ValueError(f"A Central hibás JSON-struktúrát adott: {endpoint}")
+            return result
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401 and authenticated:
+            # A régi háttérkérés nem érvénytelenítheti az időközben újraaktivált tokent.
+            current = _factory_connection()
+            if current and current.get("workstation_token") == config.get("workstation_token"):
+                REACTIVATION_REQUIRED.touch()
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", "Szerverhiba")
+        except (ValueError, UnicodeDecodeError):
+            detail = "HTTP " + str(exc.code)
+        raise ValueError(detail) from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise ValueError("A DINEXA Central nem érhető el. Ellenőrizd a címet és a kapcsolatot.") from exc
+
+
+def _sync_factory_users(config):
+    data = _central_request(config, "/api/factory/v1/workstations/sync", authenticated=True)
+    if int(data.get("manufacturer_id", -1)) != int(config["manufacturer_id"]):
+        raise ValueError("A Central más gyártó adatait küldte. A szinkronizáció megszakadt.")
+    users = data.get("users", [])
+    categories = data.get("categories", [])
+    products = data.get("products", [])
+    if not isinstance(users, list) or not isinstance(categories, list) or not isinstance(products, list):
+        raise ValueError("Hibás katalógusadatok érkeztek a Centraltól.")
+    if isinstance(data.get("manufacturer_name"), str) and data["manufacturer_name"].strip():
+        config["manufacturer_name"] = data["manufacturer_name"].strip()
+    if isinstance(data.get("workstation_name"), str) and data["workstation_name"].strip():
+        config["workstation_name"] = data["workstation_name"].strip()
+
+    # Először a Central által generált, azonos terméktípushoz állandó QR-képek
+    # letöltése; ha bármelyik hibás, a régi helyi katalógus változatlan marad.
+    qr_dir = Path(app.static_folder) / "qr"
+    qr_dir.mkdir(parents=True, exist_ok=True)
+    downloaded = []
+    published = [p for p in products if p.get("status") == "published" and p.get("latest_dpp_version") is not None]
+    try:
+        for p in published:
+            pid = int(p["id"])
+            filename = f"dinexa-central-dpp-{pid}.png"
+            url = config["central_url"].rstrip("/") + f"/dpp/{pid}/qr.png"
+            with urllib.request.urlopen(url, timeout=15) as response:
+                content = response.read(2_000_001)
+                if len(content) > 2_000_000 or not content.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError("Érvénytelen QR-kép érkezett a Centraltól.")
+            tmp = qr_dir / (filename + ".tmp")
+            tmp.write_bytes(content)
+            downloaded.append((tmp, qr_dir / filename))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        for tmp, _ in downloaded:
+            tmp.unlink(missing_ok=True)
+        raise ValueError("A DPP QR-kódok letöltése sikertelen: " + str(exc)) from exc
+
+    conn = sqlite3.connect(DATABASE)
+    try:
+        conn.execute("BEGIN")
+        conn.execute("UPDATE users SET active=0")
+        for user in users:
+            username = user["username"]
+            conn.execute("""INSERT INTO users(employee_id,name,active,pin_hash)
+                VALUES(?,?,?,NULL) ON CONFLICT(employee_id) DO UPDATE SET
+                name=excluded.name,active=excluded.active,pin_hash=NULL""",
+                (username, username, int(bool(user["is_active"]))))
+        mid = int(config["manufacturer_id"])
+        conn.execute("DELETE FROM synced_categories WHERE manufacturer_id=?", (mid,))
+        for cat in categories:
+            conn.execute("INSERT INTO synced_categories(id,manufacturer_id,name,parent_id) VALUES(?,?,?,?)",
+                         (int(cat["id"]),mid,cat["name"],cat.get("parent_id")))
+        company = config["manufacturer_code"]
+        # Offline-first: a korábban szinkronizált termékek aktívak maradnak.
+        # A Central csak jóváhagyott DPP-verziókat adhat hozzá/frissíthet.
+        # A függőben lévő verzió nem írja felül a helyi, működő változatot.
+        # A termékek kivezetését később külön, explicit visszavonási protokoll kezelheti.
+        for p in published:
+            pid = int(p["id"])
+            cat_id = p.get("category_id")
+            cat = next((c for c in categories if c["id"] == cat_id), None)
+            cat_name = cat["name"] if cat else "Besorolatlan"
+            conn.execute("""INSERT INTO products(company_id,product_id,category_code,category_name,
+                product_name,dpp_id,sku,active,qr_file,central_category_id,dpp_version)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(product_id) DO UPDATE SET
+                company_id=excluded.company_id,category_code=excluded.category_code,
+                category_name=excluded.category_name,product_name=excluded.product_name,
+                dpp_id=excluded.dpp_id,sku=excluded.sku,active=1,
+                qr_file=excluded.qr_file,central_category_id=excluded.central_category_id,
+                dpp_version=excluded.dpp_version""",
+                (company,str(pid),str(cat_id) if cat_id is not None else "uncategorized",cat_name,
+                 p["name"],str(pid),p.get("product_code"),1,
+                 f"dinexa-central-dpp-{pid}.png",cat_id,int(p["latest_dpp_version"])))
+        for tmp, target in downloaded:
+            tmp.replace(target)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return len(users), len(published)
+
+
+@app.route("/activate", methods=["GET", "POST"])
+def activate_workstation():
+    if _factory_connection() and not REACTIVATION_REQUIRED.exists():
+        return redirect(url_for("login"))
+    error = None
+    if request.method == "POST":
+        config = {
+            "central_url": (_factory_connection() or {}).get("central_url", CENTRAL_URL),
+            "manufacturer_code": request.form.get("manufacturer_code", "").strip(),
+            "workstation_code": request.form.get("workstation_code", "").strip(),
+        }
+        activation_code = request.form.get("activation_code", "").strip()
+        if not all((config["manufacturer_code"], config["workstation_code"], activation_code)):
+            error = "Minden mezőt ki kell tölteni."
+        else:
+            try:
+                result = _central_request(config, "/api/factory/v1/workstations/activate", {
+                    "manufacturer_code": config["manufacturer_code"],
+                    "workstation_code": config["workstation_code"],
+                    "activation_code": activation_code,
+                })
+                config["manufacturer_id"] = int(result["manufacturer_id"])
+                config["manufacturer_name"] = result.get("manufacturer_name") or result.get("company_name") or ""
+                config["workstation_name"] = result.get("workstation_name") or ""
+                config["workstation_token"] = result["workstation_token"]
+                _sync_factory_users(config)
+                FACTORY_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+                try:
+                    os.chmod(FACTORY_CONFIG, 0o600)
+                except OSError:
+                    pass
+                REACTIVATION_REQUIRED.unlink(missing_ok=True)
+                session.clear()
+                return redirect(url_for("login"))
+            except (ValueError, KeyError, TypeError) as exc:
+                error = str(exc)
+    return render_template("activate.html", error=error)
+
+
+@app.route("/central-sync", methods=["POST"])
+def central_sync():
+    config = _factory_connection()
+    if not config:
+        return redirect(url_for("activate_workstation"))
+    try:
+        count, product_count = _sync_factory_users(config)
+        session["sync_message"] = f"{count} felhasználó, {product_count} DPP szinkronizálva."
+    except ValueError as exc:
+        session["sync_message"] = "Szinkronizáció sikertelen: " + str(exc)
+    return redirect(url_for("login"))
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
-
+    config = _factory_connection()
+    if not config:
+        return redirect(url_for("activate_workstation"))
     error = None
-
     if request.method == "POST":
-
-        employee_id = request.form.get(
-            "employee_id", ""
-        ).strip().upper()
-
-        pin = request.form.get(
-            "pin", ""
-        ).strip()
-
-        conn = sqlite3.connect(DATABASE)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT *
-            FROM users
-            WHERE employee_id = ?
-            AND active = 1
-        """, (employee_id,))
-
-        user = cursor.fetchone()
-
-        conn.close()
-
-        if (
-            user
-            and user["pin_hash"]
-            and check_password_hash(user["pin_hash"], pin)
-        ):
-            session["employee_id"] = user["employee_id"]
-            session["employee_name"] = user["name"]
-
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        try:
+            # Online hitelesítés: a jelszó nem kerül a Factory adatbázisába.
+            result = _central_request(config, "/api/factory/v1/login", {
+                "manufacturer_id": config["manufacturer_id"],
+                "username": username, "password": password,
+            })
+            identity = result["user"]
+            if int(identity["manufacturer_id"]) != int(config["manufacturer_id"]):
+                raise ValueError("Eltérő gyártóazonosító a bejelentkezésnél.")
+            session.clear()
+            session["employee_id"] = identity["username"]
+            session["employee_name"] = identity["username"]
+            session["factory_role"] = identity["role"]
             return redirect(url_for("index"))
-
-        error = "Hibás dolgozói azonosító vagy PIN-kód."
-
-    return render_template(
-        "login.html",
-        error=error
-    )
+        except (ValueError, KeyError, TypeError) as exc:
+            error = str(exc)
+    message = session.pop("sync_message", None)
+    return render_template("login.html", error=error, sync_message=message)
 
 @app.route("/logout")
 
@@ -494,37 +646,23 @@ def index():
     if "employee_id" not in session:
         return redirect(url_for("login"))
 
+    config = _factory_connection() or {}
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT
-            product_id,
-            category_code,
-            category_name,
-            product_name,
-            dpp_id,
-            sku
-        FROM products
-        WHERE company_id = ?
-        AND active = 1
-        ORDER BY category_name, product_name
-    """, ("HU-DEMO-001",))
-
-    products = cursor.fetchall()
+    manufacturer_id = int(config.get("manufacturer_id", 0))
+    categories = [dict(r) for r in cursor.execute("""SELECT id,name,parent_id
+        FROM synced_categories WHERE manufacturer_id=? ORDER BY name COLLATE NOCASE,id""", (manufacturer_id,))]
+    products = [dict(r) for r in cursor.execute("""SELECT product_id,product_name,sku,
+        central_category_id,dpp_version,qr_file FROM products
+        WHERE company_id=? AND active=1 AND dpp_version IS NOT NULL
+        ORDER BY product_name""", (config.get("manufacturer_code", ""),))]
     products_by_category = {}
-
     for product in products:
-        category_code = product["category_code"].lower()
-
-        if category_code not in products_by_category:
-            products_by_category[category_code] = []
-
-        products_by_category[category_code].append({
-            "product_id": product["product_id"],
-            "product_name": product["product_name"]
-        })
+        code = str(product["central_category_id"] or "uncategorized")
+        products_by_category.setdefault(code, []).append({"product_id": product["product_id"],
+            "product_name": product["product_name"]})
 
     conn.close()
 
@@ -533,7 +671,15 @@ def index():
         employee_id=session["employee_id"],
         employee_name=session["employee_name"],
         products=products,
-        products_by_category=products_by_category
+        products_by_category=products_by_category,
+        catalog_categories=categories,
+        catalog_products=products,
+        manufacturer_name=config.get("manufacturer_name") or "Nincs gyártónév szinkronizálva",
+        manufacturer_code=config.get("manufacturer_code", "—"),
+        workstation_name=config.get("workstation_name", ""),
+        workstation_code=config.get("workstation_code", "—"),
+        sync_status=session.pop("sync_status", None),
+        last_sync=_last_successful_sync(config),
     )
 
 @app.route("/print")
@@ -670,6 +816,7 @@ def execute_print():
 
     conn.commit()
     conn.close()
+    _SYNC_WAKE.set()
 
     return render_template(
         "label.html",
@@ -761,6 +908,7 @@ def reprint(print_id):
 
         conn.commit()
         conn.close()
+        _SYNC_WAKE.set()
 
         return render_template(
             "label.html",
@@ -883,4 +1031,4 @@ def search_print():
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True)
+    app.run(debug=True, port=5001)

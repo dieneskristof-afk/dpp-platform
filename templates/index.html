@@ -3,8 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DPP Factory</title>
+    <title>DINEXA Factory</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+/* Letisztult, tableten is olvasható DINEXA lábléc. */
+.dinexa-app-footer{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;border-top:1px solid #dbe4eb;margin:28px 0 16px;padding:18px 4px 8px;color:#172d45;font-size:12px;line-height:1.5;}
+.dinexa-app-footer-brand{display:flex;flex-direction:column;gap:3px;font-weight:600;}
+.dinexa-app-footer-brand small{font-size:11px;font-weight:400;color:#73849a;letter-spacing:.04em;}
+.dinexa-app-footer-version{color:#73849a;font-size:11px;white-space:nowrap;}
+@media(max-width:600px){.dinexa-app-footer{align-items:flex-start;flex-direction:column;gap:8px;}}
+/* Egységes DINEXA Factory márkajelzés: a jóváhagyott logóképet használja. */
+.dinexa-factory-logo {display:block;width:410px;max-width:100%;height:auto;object-fit:contain;}
+.dinexa-factory-brand {display:flex;align-items:center;min-width:0;flex:1;}
+@media(max-width:850px){.dinexa-factory-logo{width:300px;}}
+@media(max-width:600px){.dinexa-factory-logo{width:240px;}}
+</style>
 </head>
 
 <body>
@@ -12,16 +25,14 @@
 <div class="app">
 
     <header>
-        <div>
-            <h1>DPP Factory</h1>
-            <p>Gyártói munkaállomás</p>
+        <div class="dinexa-factory-brand">
+            <img class="dinexa-factory-logo" src="{{ url_for('static', filename='images/dinexa-factory-logo.png') }}" alt="DINEXA FACTORY – Digital Production Workspace">
         </div>
 
         <div class="header-right">
 
             <div class="user-info">
-                <strong>{{ employee_id }}</strong>
-                <span>{{ employee_name }}</span>
+                <strong>{{ employee_name }}</strong>
 
                 <a href="{{ url_for('logout') }}" class="logout-button">
                     Kijelentkezés
@@ -41,11 +52,11 @@
 
         <div>
             <p class="section-label">CÉG</p>
-            <h2>DEMO Térkő Kft.</h2>
+            <h2>{{ manufacturer_name }}</h2>
 
             <div class="company-data">
-                <p><strong>Telephely:</strong> 3527 Miskolc, Gyár utca 1.</p>
-                <p><strong>Gyártóazonosító:</strong> HU-DEMO-001</p>
+                <p><strong>Gyártóazonosító:</strong> {{ manufacturer_code }}</p>
+                <p><strong>Munkaállomás-azonosító:</strong> {{ workstation_code }}</p>
             </div>
         </div>
 
@@ -54,141 +65,104 @@
 
             <div class="sync-status">
                 <span></span>
-                Szinkronizálva
+                Central kapcsolat beállítva
             </div>
 
+            {% if sync_status %}<p class="sync-time">{{ sync_status }}</p>{% endif %}
             <p class="sync-time">
                 Utolsó szinkronizáció:<br>
-                {{ session.get("last_sync", "—") }}
+                {{ last_sync }}
             </p>
 
-            <form method="POST" action="{{ url_for('sync') }}">
-                <button type="submit" class="sync-button">
-                    Szinkronizálás
-                </button>
-            </form>
+
         </div>
 
     </section>
 
 
     <section class="print-card">
-
-        <div class="section-header">
-            <div>
-                <p class="section-label">CÍMKENYOMTATÁS</p>
-                <h2>Termék kiválasztása</h2>
+        <div class="section-header"><div><p class="section-label">CÍMKENYOMTATÁS</p>
+        <h2>Termékkatalógus</h2></div></div>
+        <div class="factory-catalog-toolbar"><input type="search" id="catalogSearch" placeholder="Kategória vagy termék keresése..."></div>
+        <div class="factory-catalog-layout">
+            <aside class="factory-catalog-sidebar"><h3>Kategóriák</h3><div id="categoryTree"></div></aside>
+            <div class="factory-catalog-main">
+                <p class="section-label">KIVÁLASZTOTT KATEGÓRIA</p>
+                <h3 id="selectedTitle">Összes termék</h3><p class="factory-muted" id="selectedPath"></p>
+                <h4>Termékek <span id="productCount"></span></h4>
+                <div id="productList"></div>
+                <div id="selectedDpp" class="factory-selected-dpp" hidden>
+                    <img id="selectedQr" alt="Central által generált DPP QR-kód">
+                    <div><strong id="selectedProductName"></strong><p id="selectedVersion" class="factory-muted"></p>
+                    <a id="printDpp" class="dpp-button factory-print-link" href="#">DPP NYOMTATÁS</a></div>
+                </div>
             </div>
-
-            <a href="/search" class="search-button">
-                KERESÉS
-            </a>
         </div>
-
-        <div class="form-group">
-            <label for="category">Termékcsoport</label>
-
-            <select id="category">
-                <option value="">Válasszon termékcsoportot</option>
-                <option value="térkő">Térkövek</option>
-                <option value="szegély">Szegélykövek</option>
-            </select>
-        </div>
-
-
-        <div class="form-group">
-            <label for="product">Termék</label>
-
-            <select id="product" disabled>
-                <option>Először válasszon termékcsoportot</option>
-            </select>
-        </div>
-
-
-        <button id="dpp-button" class="dpp-button" disabled>
-            DPP NYOMTATÁS
-        </button>
-
+        {% if not catalog_products %}<p class="sync-time">Még nincs szinkronizált, publikált DPP. Az adatok automatikusan frissülnek.</p>{% endif %}
     </section>
-
+    <footer class="dinexa-app-footer" aria-label="DINEXA jogi és verzióinformációk">
+        <div class="dinexa-app-footer-brand">
+            <span>© 2026 DINEXA. Minden jog fenntartva.</span>
+            <small>Digital Product Intelligence</small>
+        </div>
+        <span class="dinexa-app-footer-version">Factory Workstation · v1.0.0</span>
+    </footer>
 </div>
-
-
+<style>
+.factory-catalog-toolbar{margin:20px 0}.factory-catalog-toolbar input{width:100%;box-sizing:border-box;padding:13px;border:1px solid #d8e0e9;border-radius:8px;font-size:15px}
+.factory-catalog-layout{display:grid;grid-template-columns:minmax(220px,34%) minmax(0,1fr);gap:18px}
+.factory-catalog-sidebar,.factory-catalog-main{border:1px solid #e2e8f0;border-radius:12px;padding:20px;min-width:0}
+.factory-catalog-sidebar{background:#f8fafc;max-height:650px;overflow:auto}
+.factory-catalog-sidebar h3,.factory-catalog-main h3{margin:0 0 15px}
+.factory-tree-row{display:flex;align-items:center;border-radius:7px;padding:4px 6px;gap:5px}
+.factory-tree-row:hover{background:#e7f4f6}.factory-tree-row.selected{background:#d9f1f4}
+.factory-tree-toggle,.factory-tree-name{background:none;border:0;cursor:pointer;color:#18273d;text-align:left}
+.factory-tree-toggle{width:20px;flex:none}.factory-tree-name{flex:1;padding:7px 2px;min-width:0}
+.factory-muted{color:#74849a;font-size:13px}.factory-product{border-bottom:1px solid #e2e8f0;padding:14px 0;display:block;width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left;cursor:pointer;color:#008c9e}
+.factory-product small{display:block;color:#74849a;margin-top:7px}.factory-product.selected{background:#e7f4f6;border-radius:6px;padding-left:10px}
+.factory-selected-dpp{border-top:1px solid #e2e8f0;margin-top:20px;padding-top:20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.factory-selected-dpp[hidden]{display:none}.factory-selected-dpp img{width:135px;height:135px;object-fit:contain;border:1px solid #e2e8f0;border-radius:8px}
+.factory-print-link{display:inline-block;text-align:center;text-decoration:none;padding:13px 22px;margin-top:12px;box-sizing:border-box}
+@media(max-width:700px){.factory-catalog-layout{grid-template-columns:1fr}}
+</style>
 <script>
-
-const products = {{ products_by_category | tojson }};
-
-
-const categorySelect = document.getElementById("category");
-const productSelect = document.getElementById("product");
-const dppButton = document.getElementById("dpp-button");
-
-
-categorySelect.addEventListener("change", function () {
-
-    const category = this.value;
-
-    productSelect.innerHTML = "";
-    dppButton.disabled = true;
-
-
-    if (!category) {
-
-        productSelect.disabled = true;
-
-        const option = document.createElement("option");
-        option.textContent = "Először válasszon termékcsoportot";
-
-        productSelect.appendChild(option);
-
-        return;
-    }
-
-
-    productSelect.disabled = false;
-
-    const firstOption = document.createElement("option");
-
-    firstOption.value = "";
-    firstOption.textContent = "Válasszon terméket";
-
-    productSelect.appendChild(firstOption);
-
-
-    products[category].forEach(function(product) {
-
-        const option = document.createElement("option");
-
-        option.value = product.product_id;
-        option.textContent = product.product_name;
-
-        productSelect.appendChild(option);
-
-    });
-
-});
-
-
-productSelect.addEventListener("change", function () {
-
-    dppButton.disabled = !this.value;
-
-});
-dppButton.addEventListener("click", function () {
-
-    const category = categorySelect.value;
-    const product = productSelect.value;
-
-    if (!category || !product) {
-        return;
-    }
-
-    window.location.href =
-        "/print?product_id=" +
-        encodeURIComponent(product);
-});
-
+const categories = {{ catalog_categories | tojson }};
+const products = {{ catalog_products | tojson }};
+const categoryMap = new Map(categories.map(c=>[c.id,c]));
+const expanded = new Set();let selectedId=null;let searchText='';let selectedProduct=null;
+const tree=document.getElementById('categoryTree');
+const productList=document.getElementById('productList');
+function getChildren(parent){return categories.filter(c=>c.parent_id===parent).sort((a,b)=>a.name.localeCompare(b.name,'hu'))}
+function pathOf(id){let names=[],seen=new Set(),c=categoryMap.get(id);while(c&&!seen.has(c.id)){seen.add(c.id);names.unshift(c.name);c=categoryMap.get(c.parent_id)}return names.join(' → ')}
+function categoryMatches(c,seen=new Set()){if(seen.has(c.id))return false;seen.add(c.id);return !searchText||c.name.toLocaleLowerCase('hu').includes(searchText)||products.some(p=>p.central_category_id===c.id&&(p.product_name.toLocaleLowerCase('hu').includes(searchText)||(p.sku||'').toLocaleLowerCase('hu').includes(searchText)))||getChildren(c.id).some(child=>categoryMatches(child,new Set(seen)))}
+function renderTree(){tree.replaceChildren();const visited=new Set();function branch(parent,depth){getChildren(parent).forEach(c=>{if(visited.has(c.id))return;visited.add(c.id);if(!categoryMatches(c))return;const row=document.createElement('div');row.className='factory-tree-row'+(selectedId===c.id?' selected':'');row.style.paddingLeft=(depth*15+5)+'px';const children=getChildren(c.id);const toggle=document.createElement('button');toggle.type='button';toggle.className='factory-tree-toggle';toggle.textContent=children.length?(expanded.has(c.id)?'▾':'▸'):'·';toggle.onclick=()=>{expanded.has(c.id)?expanded.delete(c.id):expanded.add(c.id);renderTree()};const name=document.createElement('button');name.type='button';name.className='factory-tree-name';name.textContent='📁 '+c.name;name.onclick=()=>{selectedId=c.id;selectedProduct=null;renderAll()};row.append(toggle,name);tree.append(row);if(searchText||expanded.has(c.id))branch(c.id,depth+1)})}branch(null,0);categories.forEach(c=>{if(!visited.has(c.id)&&!categoryMap.has(c.parent_id))branch(c.parent_id,0)})}
+function renderProducts(){productList.replaceChildren();document.getElementById('selectedTitle').textContent=categoryMap.get(selectedId)?.name||'Összes termék';document.getElementById('selectedPath').textContent=selectedId===null?'':pathOf(selectedId);const visible=products.filter(p=>(selectedId===null||p.central_category_id===selectedId)&&(!searchText||p.product_name.toLocaleLowerCase('hu').includes(searchText)||(p.sku||'').toLocaleLowerCase('hu').includes(searchText)));document.getElementById('productCount').textContent='('+visible.length+')';if(!visible.length){const empty=document.createElement('p');empty.className='factory-muted';empty.textContent='Nincs megjeleníthető, publikált DPP.';productList.append(empty)}visible.forEach(p=>{const btn=document.createElement('button');btn.type='button';btn.className='factory-product'+(selectedProduct===p.product_id?' selected':'');const name=document.createElement('strong');name.textContent=p.product_name;const detail=document.createElement('small');detail.textContent='Cikkszám: '+(p.sku||'Nincs megadva')+' · DPP v'+p.dpp_version;btn.append(name,detail);btn.onclick=()=>{selectedProduct=p.product_id;renderProducts()};productList.append(btn)});const selected=visible.find(p=>p.product_id===selectedProduct);const panel=document.getElementById('selectedDpp');panel.hidden=!selected;if(selected){document.getElementById('selectedProductName').textContent=selected.product_name;document.getElementById('selectedVersion').textContent='Publikált DPP · v'+selected.dpp_version;document.getElementById('selectedQr').src={{ url_for('static', filename='qr/') | tojson }}+encodeURIComponent(selected.qr_file);document.getElementById('printDpp').href={{ url_for('print_page') | tojson }}+'?product_id='+encodeURIComponent(selected.product_id)}}
+function renderAll(){renderTree();renderProducts()}
+document.getElementById('catalogSearch').addEventListener('input',e=>{searchText=e.target.value.trim().toLocaleLowerCase('hu');renderAll()});renderAll();
 </script>
-
+<script>
+// A Factory háttérszinkronja ellenőrzi a Centralt. A megnyitott oldal
+// automatikusan az aktiválásra vált, ha a Central visszavonta a hozzáférést.
+(function () {
+    async function checkActivation() {
+        if (document.hidden) return;
+        try {
+            const response = await fetch({{ url_for('factory_activation_status') | tojson }}, {
+                cache: 'no-store', credentials: 'same-origin'
+            });
+            if (!response.ok) return;
+            const status = await response.json();
+            if (status.reactivation_required) {
+                window.location.replace({{ url_for('activate_workstation') | tojson }});
+            }
+        } catch (error) {
+            // Offline állapotban a helyi alkalmazás tovább használható.
+        }
+    }
+    checkActivation();
+    window.setInterval(checkActivation, 5000);
+    document.addEventListener('visibilitychange', checkActivation);
+})();
+</script>
 </body>
 </html>

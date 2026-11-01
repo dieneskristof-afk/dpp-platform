@@ -480,3 +480,53 @@ select:focus {
 .search-button:hover {
     opacity: 0.9;
 }
+
+/* DINEXA Factory – arculati réteg v1: a meglévő stílusok megőrzésével */
+:root {
+    --dinexa-navy: #14243a;
+    --dinexa-teal: #168d9d;
+    --dinexa-bg: #f3f6fa;
+}
+body { background: var(--dinexa-bg); color: var(--dinexa-navy); }
+.app { max-width: 1140px; }
+.app > header {
+    background: #fff;
+    padding: 18px 24px;
+    border-radius: 14px;
+    box-shadow: 0 2px 10px rgba(20,36,58,.04);
+}
+.dinexa-brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.dinexa-brand img { width: 195px; max-width: 45vw; height: auto; display: block; }
+.dinexa-product-name {
+    font-size: 25px;
+    font-weight: 750;
+    letter-spacing: -.5px;
+    color: var(--dinexa-navy);
+    padding-left: 16px;
+    border-left: 2px solid #dce7ed;
+}
+.company-card, .print-card {
+    border: 1px solid #e7edf2;
+    box-shadow: 0 4px 18px rgba(20,36,58,.04);
+}
+.company-card { border-top: 3px solid var(--dinexa-teal); }
+.print-card { border-top: 3px solid var(--dinexa-teal); }
+.dpp-button, .new-print-button, .search-button {
+    background: var(--dinexa-teal);
+    color: white;
+    transition: background .15s ease;
+}
+.dpp-button:not(:disabled):hover, .new-print-button:hover, .search-button:hover {
+    background: #087e91;
+}
+.sync-button:hover { background: #e7f4f6; border-color: var(--dinexa-teal); }
+input:focus, select:focus { outline: 2px solid rgba(22,141,157,.24); border-color: var(--dinexa-teal); }
+.back-link, .doc-back { color: var(--dinexa-teal); }
+@media (max-width: 700px) {
+    .app > header { flex-direction: column; align-items: stretch; gap: 15px; padding: 16px; }
+    .header-right { flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+    .user-info { flex-wrap: wrap; }
+    .dinexa-brand img { width: 155px; }
+    .dinexa-product-name { font-size: 21px; padding-left: 12px; }
+    .dpp-button { min-height: 54px; }
+}
