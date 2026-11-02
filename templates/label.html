@@ -45,14 +45,14 @@
         {% if serials %}
             {% for serial in serials %}
             <div class="label-preview" style="margin-bottom: 16px;">
-                <img src="{{ url_for('static', filename='qr/' + qr_filename) }}" alt="DPP QR-kód">
+                <img src="{{ url_for('factory_qr', filename=qr_filename) }}" alt="DPP QR-kód">
                 <div class="label-prn">{{ serial }}</div>
             </div>
             {% endfor %}
             <p>Nyomtatási napló azonosítója: {{ print_id }}</p>
         {% else %}
             <div class="label-preview">
-                <img src="{{ url_for('static', filename='qr/' + qr_filename) }}" alt="DPP QR-kód">
+                <img src="{{ url_for('factory_qr', filename=qr_filename) }}" alt="DPP QR-kód">
                 <div class="label-prn">{{ print_id }}</div>
             </div>
         {% endif %}

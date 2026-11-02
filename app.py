@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 import uuid
@@ -18,12 +18,14 @@ app = Flask(__name__)
 # A Central és a Factory azonos localhost címen is külön cookie-t használ.
 app.config["SESSION_COOKIE_NAME"] = "dinexa_factory_session"
 app.secret_key = os.environ.get("DINEXA_FACTORY_SECRET_KEY", "dpp-demo-secret-key")
-# Gyártófüggetlen telepítés: a futás közbeni adatok NEM a GitHubon tárolt fájlok.
-# A Render ingyenes példányán ez az adatkönyvtár nem tartós: új deploy után
-# ismételt aktiválásra lehet szükség. Tableten később tartós helyi útvonal adható.
+# A futásidejű adatok a Render tartós lemezére kerülnek, ha
+# DINEXA_FACTORY_DATA_DIR=/var/data/factory van beállítva.
+# A forráskódban nincsenek gyártóspecifikus alapadatok.
 FACTORY_DATA_DIR = Path(os.environ.get("DINEXA_FACTORY_DATA_DIR", str(Path(__file__).resolve().parent / ".factory_runtime")))
 FACTORY_DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE = str(FACTORY_DATA_DIR / "dpp_factory.db")
+QR_DATA_DIR = FACTORY_DATA_DIR / "qr"
+QR_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 
@@ -498,7 +500,7 @@ def _sync_factory_users(config):
 
     # Először a Central által generált, azonos terméktípushoz állandó QR-képek
     # letöltése; ha bármelyik hibás, a régi helyi katalógus változatlan marad.
-    qr_dir = Path(app.static_folder) / "qr"
+    qr_dir = QR_DATA_DIR
     qr_dir.mkdir(parents=True, exist_ok=True)
     downloaded = []
     published = [p for p in products if p.get("status") == "published" and p.get("latest_dpp_version") is not None]
@@ -564,6 +566,14 @@ def _sync_factory_users(config):
     finally:
         conn.close()
     return len(users), len(published)
+
+
+@app.route("/factory/qr/<path:filename>")
+def factory_qr(filename):
+    """A tartós lemezen tárolt, Centralból szinkronizált QR-képek kiszolgálása."""
+    if "employee_id" not in session:
+        return redirect(url_for("login"))
+    return send_from_directory(QR_DATA_DIR, filename)
 
 
 @app.route("/activate", methods=["GET", "POST"])
@@ -832,11 +842,7 @@ def execute_print():
     if not qr_filename:
         return "Ehhez a termékhez nincs QR-kód rendelve.", 404
 
-    qr_path = os.path.join(
-        app.static_folder,
-        "qr",
-        qr_filename
-    )
+    qr_path = QR_DATA_DIR / qr_filename
 
     if not os.path.exists(qr_path):
         return "A termék QR-kódja nincs letöltve erre az eszközre.", 404
@@ -953,11 +959,7 @@ def reprint(print_id):
         if not qr_filename:
             return "A termékhez nincs QR-kód rendelve.", 404
 
-        qr_path = os.path.join(
-            app.static_folder,
-            "qr",
-            qr_filename
-        )
+        qr_path = QR_DATA_DIR / qr_filename
 
         if not os.path.exists(qr_path):
             return "A termék QR-kódja nincs letöltve erre az eszközre.", 404
