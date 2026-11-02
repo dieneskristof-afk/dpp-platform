@@ -487,7 +487,10 @@ def _central_request(config, endpoint, payload=None, authenticated=False):
         # Átmeneti token- vagy szerverhiba esetén az adatokat megőrizzük;
         # gyártóváltást kizárólag a bejelentkezési oldal manuális gombja kérhet.
         try:
-            detail = json.loads(exc.read().decode("utf-8")).get("error", "Szerverhiba")
+            body = json.loads(exc.read().decode("utf-8"))
+            detail = body.get("error", "Szerverhiba")
+            if body.get("code"):
+                detail += " [" + str(body["code"]) + "]"
         except (ValueError, UnicodeDecodeError):
             detail = "HTTP " + str(exc.code)
         raise ValueError(detail) from exc
