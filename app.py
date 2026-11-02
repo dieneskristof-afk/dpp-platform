@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, s
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 import uuid
+import re
 import sqlite3
 import os
 import csv
@@ -818,76 +819,36 @@ def _is_battery_product(product):
                or "home 5" in v for v in values)
 
 
-def _ensure_battery_ranges(conn):
-    conn.execute("""CREATE TABLE IF NOT EXISTS battery_number_ranges (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        manufacturer_code TEXT NOT NULL,
-        next_number INTEGER NOT NULL,
-        last_number INTEGER NOT NULL
-    )""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS battery_range_pending (
-        manufacturer_code TEXT PRIMARY KEY,
-        reservation_id TEXT NOT NULL,
-        quantity INTEGER NOT NULL
-    )""")
-
-
-def _ensure_available_battery_numbers(quantity):
-    """Persist request ID before contacting Central, so retries never burn ranges."""
-    config = _factory_connection()
-    if not config or not config.get('manufacturer_code'):
-        raise ValueError('A Factory nincs aktiválva.')
-    code = config['manufacturer_code']
-    with sqlite3.connect(DATABASE, timeout=15) as db:
-        _ensure_battery_ranges(db)
-        available = db.execute('SELECT COALESCE(SUM(last_number-next_number+1),0) FROM battery_number_ranges WHERE manufacturer_code=? AND next_number<=last_number', (code,)).fetchone()[0]
-        if available >= quantity:
-            return
-        pending = db.execute('SELECT reservation_id,quantity FROM battery_range_pending WHERE manufacturer_code=?', (code,)).fetchone()
-        if pending:
-            reservation_id, reserve_quantity = pending
-        else:
-            import uuid
-            reservation_id = uuid.uuid4().hex
-            reserve_quantity = max(1000, quantity-available)
-            db.execute('INSERT INTO battery_range_pending(manufacturer_code,reservation_id,quantity) VALUES(?,?,?)',
-                       (code,reservation_id,reserve_quantity))
-    result = _central_request(config, '/api/factory/v1/battery-serial-range',
-                              {'quantity': reserve_quantity, 'reservation_id': reservation_id}, authenticated=True)
-    first, last = int(result['first']), int(result['last'])
-    if (result.get('reservation_id') != reservation_id or first < 1 or
-            last-first+1 != reserve_quantity):
-        raise ValueError('Érvénytelen Central számtartomány-visszaigazolás.')
-    with sqlite3.connect(DATABASE, timeout=15) as db:
-        _ensure_battery_ranges(db)
-        pending = db.execute('SELECT reservation_id FROM battery_range_pending WHERE manufacturer_code=?', (code,)).fetchone()
-        if not pending or pending[0] != reservation_id:
-            raise ValueError('A függő számtartomány-foglalás megváltozott.')
-        db.execute('INSERT INTO battery_number_ranges(manufacturer_code,next_number,last_number) VALUES(?,?,?)',
-                   (code,first,last))
-        db.execute('DELETE FROM battery_range_pending WHERE manufacturer_code=? AND reservation_id=?',
-                   (code,reservation_id))
-
-
 def _allocate_battery_serials(conn, product_id, print_id, quantity, now):
-    """Consume pre-reserved, nonoverlapping Central ranges in the same print transaction."""
+    """Factory-local, transactional BAT serial allocation; no Central reservation."""
     config = _factory_connection() or {}
     code = str(config.get('manufacturer_code') or '')
-    if not code.startswith('DNX-M-') or len(code[6:]) != 12:
+    if not re.fullmatch(r'DNX-M-[0-9A-F]{12}', code):
         raise ValueError('Érvénytelen DINEXA gyártóazonosító.')
-    _ensure_battery_ranges(conn)
-    remaining = quantity
-    numbers = []
-    for rid, nxt, last in conn.execute('SELECT id,next_number,last_number FROM battery_number_ranges WHERE manufacturer_code=? AND next_number<=last_number ORDER BY id', (code,)).fetchall():
-        take = min(remaining, last-nxt+1)
-        numbers.extend(range(nxt,nxt+take))
-        conn.execute('UPDATE battery_number_ranges SET next_number=? WHERE id=?', (nxt+take,rid))
-        remaining -= take
-        if not remaining:
-            break
-    if remaining:
-        raise ValueError('Nincs lefoglalt sorozatszám. Kapcsolódj a Centralhoz.')
-    serials = [f"BAT-{code[6:]}-F-{number:08d}" for number in numbers]
+    # A számláló és a napló ugyanabban a BEGIN IMMEDIATE tranzakcióban frissül.
+    conn.execute("""CREATE TABLE IF NOT EXISTS battery_local_counters (
+        manufacturer_code TEXT PRIMARY KEY,
+        last_number INTEGER NOT NULL DEFAULT 0
+    )""")
+    row = conn.execute('SELECT last_number FROM battery_local_counters WHERE manufacturer_code=?', (code,)).fetchone()
+    previous = int(row[0]) if row else 0
+    # Korábbi helyi sorszámokból és korábban lefoglalt tartományokból indulunk.
+    # Így egy telepítés nem használja újra a saját korábbi sorszámait.
+    prefix = 'BAT-' + code[6:] + '-F-'
+    for (old_serial,) in conn.execute('SELECT serial FROM battery_serials WHERE serial LIKE ?', (prefix + '%',)):
+        suffix = str(old_serial)[len(prefix):]
+        if len(suffix) == 8 and suffix.isdigit():
+            previous = max(previous, int(suffix))
+    has_ranges = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='battery_number_ranges'").fetchone()
+    if has_ranges:
+        reserved = conn.execute('SELECT MAX(last_number) FROM battery_number_ranges WHERE manufacturer_code=?', (code,)).fetchone()[0]
+        previous = max(previous, int(reserved or 0))
+    last = previous + quantity
+    if last > 99999999:
+        raise ValueError('Betelt a nyolcjegyű Factory-sorozatszám tartomány.')
+    conn.execute("""INSERT INTO battery_local_counters(manufacturer_code,last_number) VALUES(?,?)
+        ON CONFLICT(manufacturer_code) DO UPDATE SET last_number=excluded.last_number""", (code,last))
+    serials = [f'{prefix}{number:08d}' for number in range(previous+1,last+1)]
     conn.executemany('INSERT INTO battery_serials(serial,product_id,print_id,created_at) VALUES(?,?,?,?)',
                      [(serial,product_id,print_id,now) for serial in serials])
     return serials
@@ -920,7 +881,7 @@ def execute_print():
     now = datetime.now()
 
     # Belső eseménykulcs a Central/Portal naplózásához; nem kerül a címkére.
-    print_id = "EVT-" + uuid.uuid4().hex.upper()
+    print_id = "PRN-" + now.strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:8].upper()
 
     try:
         quantity = int(quantity)
@@ -929,11 +890,6 @@ def execute_print():
     if quantity < 1 or quantity > 1000:
         return "A darabszám 1 és 1000 között lehet.", 400
 
-    if _is_battery_product(product):
-        try:
-            _ensure_available_battery_numbers(quantity)
-        except Exception as exc:
-            return f"Sorozatszám-foglalás sikertelen: {exc}", 503
 
     conn = sqlite3.connect(DATABASE, timeout=15)
     cursor = conn.cursor()
