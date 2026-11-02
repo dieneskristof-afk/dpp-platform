@@ -21,20 +21,8 @@ app.secret_key = os.environ.get("DINEXA_FACTORY_SECRET_KEY", "dpp-demo-secret-ke
 # A futásidejű adatok a Render tartós lemezére kerülnek, ha
 # DINEXA_FACTORY_DATA_DIR=/var/data/factory van beállítva.
 # A forráskódban nincsenek gyártóspecifikus alapadatok.
-# Renderen a csatolt Persistent Disk az elsődleges adatforrás akkor is, ha
-# a környezeti változó véletlenül kimaradt. Helyben marad a fejlesztői mappa.
-_configured_data_dir = os.environ.get("DINEXA_FACTORY_DATA_DIR", "").strip()
-_render_disk_dir = Path("/var/data/factory")
-if _configured_data_dir:
-    FACTORY_DATA_DIR = Path(_configured_data_dir)
-elif _render_disk_dir.is_dir():
-    FACTORY_DATA_DIR = _render_disk_dir
-elif os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"):
-    raise RuntimeError("A Factory Render Persistent Disk nem található: /var/data/factory. A tartós adatok védelmében az alkalmazás nem indul ideiglenes adatbázissal.")
-else:
-    FACTORY_DATA_DIR = Path(__file__).resolve().parent / ".factory_runtime"
+FACTORY_DATA_DIR = Path(os.environ.get("DINEXA_FACTORY_DATA_DIR", str(Path(__file__).resolve().parent / ".factory_runtime")))
 FACTORY_DATA_DIR.mkdir(parents=True, exist_ok=True)
-logging.getLogger("dinexa.factory.storage").warning("Factory adatkönyvtár: %s", FACTORY_DATA_DIR)
 DATABASE = str(FACTORY_DATA_DIR / "dpp_factory.db")
 QR_DATA_DIR = FACTORY_DATA_DIR / "qr"
 QR_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -186,11 +174,11 @@ def _upload_print_events(config):
             LEFT JOIN print_log p ON p.print_id=r.print_id WHERE r.synced=0 ORDER BY r.id LIMIT 100''').fetchall()
         events = []
         for r in prints:
-            events.append(dict(event_key=f"{config['workstation_code']}:print:{r['id']}", event_type='print',
+            events.append(dict(event_key=f"{config['workstation_code']}:print:{r['print_id']}", event_type='print',
                 print_id=r['print_id'], product_id=r['product_id'], product_name=r['product'],
                 category=r['category'], username=r['employee_id'], quantity=r['quantity'], occurred_at=r['printed_at']))
         for r in reprints:
-            events.append(dict(event_key=f"{config['workstation_code']}:reprint:{r['id']}", event_type='reprint',
+            events.append(dict(event_key=f"{config['workstation_code']}:reprint:{r['id']}:{r['print_id']}", event_type='reprint',
                 print_id=r['print_id'], product_id=r['product_id'], product_name=r['product'] or 'Ismeretlen termék',
                 category=r['category'], username=r['employee_id'], quantity=r['quantity'], occurred_at=r['reprinted_at']))
         if not events:
@@ -201,10 +189,10 @@ def _upload_print_events(config):
             raise ValueError('Hibás szerver-visszaigazolás')
         with conn:
             for r in prints:
-                if f"{config['workstation_code']}:print:{r['id']}" in acknowledged:
+                if f"{config['workstation_code']}:print:{r['print_id']}" in acknowledged:
                     conn.execute('UPDATE print_log SET synced=1 WHERE id=?', (r['id'],))
             for r in reprints:
-                if f"{config['workstation_code']}:reprint:{r['id']}" in acknowledged:
+                if f"{config['workstation_code']}:reprint:{r['id']}:{r['print_id']}" in acknowledged:
                     conn.execute('UPDATE reprint_log SET synced=1 WHERE id=?', (r['id'],))
         return len(acknowledged)
     finally:
