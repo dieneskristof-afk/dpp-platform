@@ -309,7 +309,7 @@ def _start_automatic_sync():
 def _ensure_automatic_sync():
     # A WSGI-kiszolgálóban is induljon, ne csak a python app.py használatakor.
     _start_automatic_sync()
-    if REACTIVATION_REQUIRED.exists():
+    if _manual_reactivation_requested():
         session.clear()
         if request.endpoint not in ("activate_workstation", "static"):
             return redirect(url_for("activate_workstation"))
@@ -320,7 +320,7 @@ def factory_activation_status():
     """A böngésző a háttérszinkron által jelzett újraaktiválást ellenőrzi."""
     from flask import jsonify
     response = jsonify({"reactivation_required": (
-        REACTIVATION_REQUIRED.exists() or _factory_connection() is None
+        _manual_reactivation_requested() or _factory_connection() is None
     )})
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -432,6 +432,14 @@ def public_product(dpp_id):
 # DINEXA Central kapcsolat: az aktiválás és a felhasználók szinkronja.
 FACTORY_CONFIG = FACTORY_DATA_DIR / "factory_connection.json"
 REACTIVATION_REQUIRED = FACTORY_CONFIG.with_name("factory_reactivation_required.flag")
+# Korábbi verziók automatikusan is létrehoztak üres jelzőfájlt 401-es hibára.
+# Csak a kifejezetten kézzel kért gyártóváltás legyen érvényes.
+def _manual_reactivation_requested():
+    try:
+        return REACTIVATION_REQUIRED.read_text(encoding="utf-8").strip() == "manual"
+    except OSError:
+        return False
+
 # Fejlesztéskor localhost; éles telepítésnél DINEXA_CENTRAL_URL környezeti változó.
 CENTRAL_URL = os.environ.get("DINEXA_CENTRAL_URL", "http://127.0.0.1:5000").strip().rstrip("/")
 
@@ -470,11 +478,9 @@ def _central_request(config, endpoint, payload=None, authenticated=False):
                 raise ValueError(f"A Central hibás JSON-struktúrát adott: {endpoint}")
             return result
     except urllib.error.HTTPError as exc:
-        if exc.code == 401 and authenticated:
-            # A régi háttérkérés nem érvénytelenítheti az időközben újraaktivált tokent.
-            current = _factory_connection()
-            if current and current.get("workstation_token") == config.get("workstation_token"):
-                REACTIVATION_REQUIRED.touch()
+        # A Central 401-es válasza nem törölheti a munkaállomás aktiválását.
+        # Átmeneti token- vagy szerverhiba esetén az adatokat megőrizzük;
+        # gyártóváltást kizárólag a bejelentkezési oldal manuális gombja kérhet.
         try:
             detail = json.loads(exc.read().decode("utf-8")).get("error", "Szerverhiba")
         except (ValueError, UnicodeDecodeError):
@@ -578,7 +584,7 @@ def factory_qr(filename):
 
 @app.route("/activate", methods=["GET", "POST"])
 def activate_workstation():
-    if _factory_connection() and not REACTIVATION_REQUIRED.exists():
+    if _factory_connection() and not _manual_reactivation_requested():
         return redirect(url_for("login"))
     error = None
     if request.method == "POST":
@@ -669,7 +675,7 @@ def switch_workstation():
             f"{pending_prints + pending_reprints} nyomtatási esemény még nincs szinkronizálva."
         )
         return redirect(url_for("login"))
-    REACTIVATION_REQUIRED.touch()
+    REACTIVATION_REQUIRED.write_text("manual", encoding="utf-8")
     session.clear()
     return redirect(url_for("activate_workstation"))
 
