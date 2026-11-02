@@ -825,10 +825,15 @@ def _ensure_battery_ranges(conn):
         next_number INTEGER NOT NULL,
         last_number INTEGER NOT NULL
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS battery_range_pending (
+        manufacturer_code TEXT PRIMARY KEY,
+        reservation_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL
+    )""")
 
 
 def _ensure_available_battery_numbers(quantity):
-    """Reserve disjoint Central-issued numbers; cache them for offline printing."""
+    """Persist request ID before contacting Central, so retries never burn ranges."""
     config = _factory_connection()
     if not config or not config.get('manufacturer_code'):
         raise ValueError('A Factory nincs aktiválva.')
@@ -836,17 +841,32 @@ def _ensure_available_battery_numbers(quantity):
     with sqlite3.connect(DATABASE, timeout=15) as db:
         _ensure_battery_ranges(db)
         available = db.execute('SELECT COALESCE(SUM(last_number-next_number+1),0) FROM battery_number_ranges WHERE manufacturer_code=? AND next_number<=last_number', (code,)).fetchone()[0]
-    if available >= quantity:
-        return
-    # A Central atomically reserves a unique block for this manufacturer and source.
+        if available >= quantity:
+            return
+        pending = db.execute('SELECT reservation_id,quantity FROM battery_range_pending WHERE manufacturer_code=?', (code,)).fetchone()
+        if pending:
+            reservation_id, reserve_quantity = pending
+        else:
+            import uuid
+            reservation_id = uuid.uuid4().hex
+            reserve_quantity = max(1000, quantity-available)
+            db.execute('INSERT INTO battery_range_pending(manufacturer_code,reservation_id,quantity) VALUES(?,?,?)',
+                       (code,reservation_id,reserve_quantity))
     result = _central_request(config, '/api/factory/v1/battery-serial-range',
-                              {'quantity': max(1000, quantity - available)}, authenticated=True)
+                              {'quantity': reserve_quantity, 'reservation_id': reservation_id}, authenticated=True)
     first, last = int(result['first']), int(result['last'])
-    if first < 1 or last < first or last-first+1 < quantity-available:
-        raise ValueError('Érvénytelen Central számtartomány.')
+    if (result.get('reservation_id') != reservation_id or first < 1 or
+            last-first+1 != reserve_quantity):
+        raise ValueError('Érvénytelen Central számtartomány-visszaigazolás.')
     with sqlite3.connect(DATABASE, timeout=15) as db:
         _ensure_battery_ranges(db)
-        db.execute('INSERT INTO battery_number_ranges(manufacturer_code,next_number,last_number) VALUES(?,?,?)', (code,first,last))
+        pending = db.execute('SELECT reservation_id FROM battery_range_pending WHERE manufacturer_code=?', (code,)).fetchone()
+        if not pending or pending[0] != reservation_id:
+            raise ValueError('A függő számtartomány-foglalás megváltozott.')
+        db.execute('INSERT INTO battery_number_ranges(manufacturer_code,next_number,last_number) VALUES(?,?,?)',
+                   (code,first,last))
+        db.execute('DELETE FROM battery_range_pending WHERE manufacturer_code=? AND reservation_id=?',
+                   (code,reservation_id))
 
 
 def _allocate_battery_serials(conn, product_id, print_id, quantity, now):
