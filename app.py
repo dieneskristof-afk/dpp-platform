@@ -21,7 +21,7 @@ app.secret_key = os.environ.get("DINEXA_FACTORY_SECRET_KEY", "dpp-demo-secret-ke
 # A futásidejű adatok a Render tartós lemezére kerülnek, ha
 # DINEXA_FACTORY_DATA_DIR=/var/data/factory van beállítva.
 # A forráskódban nincsenek gyártóspecifikus alapadatok.
-FACTORY_DATA_DIR = Path(os.environ.get("DINEXA_FACTORY_DATA_DIR", str(Path(__file__).resolve().parent / ".factory_runtime")))
+FACTORY_DATA_DIR = Path(os.environ.get("DINEXA_FACTORY_DATA_DIR") or ("/var/data/factory" if Path("/var/data/factory").is_dir() else str(Path(__file__).resolve().parent / ".factory_runtime")))
 FACTORY_DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE = str(FACTORY_DATA_DIR / "dpp_factory.db")
 QR_DATA_DIR = FACTORY_DATA_DIR / "qr"
@@ -174,11 +174,15 @@ def _upload_print_events(config):
             LEFT JOIN print_log p ON p.print_id=r.print_id WHERE r.synced=0 ORDER BY r.id LIMIT 100''').fetchall()
         events = []
         for r in prints:
-            events.append(dict(event_key=f"{config['workstation_code']}:print:{r['print_id']}", event_type='print',
+            serials = [item[0] for item in conn.execute(
+                'SELECT serial FROM battery_serials WHERE print_id=? ORDER BY serial', (r['print_id'],)).fetchall()]
+            events.append(dict(serials=serials, event_key=f"{config['workstation_code']}:print:{r['print_id']}", event_type='print',
                 print_id=r['print_id'], product_id=r['product_id'], product_name=r['product'],
                 category=r['category'], username=r['employee_id'], quantity=r['quantity'], occurred_at=r['printed_at']))
         for r in reprints:
-            events.append(dict(event_key=f"{config['workstation_code']}:reprint:{r['id']}:{r['print_id']}", event_type='reprint',
+            serials = [item[0] for item in conn.execute(
+                'SELECT serial FROM battery_serials WHERE print_id=? ORDER BY serial', (r['print_id'],)).fetchall()]
+            events.append(dict(serials=serials[:r['quantity']], event_key=f"{config['workstation_code']}:reprint:{r['id']}:{r['print_id']}", event_type='reprint',
                 print_id=r['print_id'], product_id=r['product_id'], product_name=r['product'] or 'Ismeretlen termék',
                 category=r['category'], username=r['employee_id'], quantity=r['quantity'], occurred_at=r['reprinted_at']))
         if not events:
@@ -814,27 +818,58 @@ def _is_battery_product(product):
                or "home 5" in v for v in values)
 
 
-def _allocate_battery_serials(conn, product_id, print_id, quantity, now):
-    """Globálisan növekvő BAT-F sorszám ezen a Factory-adatbázison belül.
+def _ensure_battery_ranges(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS battery_number_ranges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        manufacturer_code TEXT NOT NULL,
+        next_number INTEGER NOT NULL,
+        last_number INTEGER NOT NULL
+    )""")
 
-    A BEGIN IMMEDIATE tranzakció megakadályozza a párhuzamos kiosztási ütközést.
-    A régi BAT-HOME-5-F sorozatok számait is figyelembe vesszük.
-    """
-    prefix = "BAT-F-"
-    previous_serials = conn.execute("SELECT serial FROM battery_serials").fetchall()
-    max_number = 0
-    for (old_serial,) in previous_serials:
-        if old_serial.startswith(("BAT-F-", "BAT-HOME-5-F-")):
-            suffix = old_serial.rsplit("-", 1)[-1]
-            if suffix.isdigit():
-                max_number = max(max_number, int(suffix))
-    next_number = max_number + 1
-    if next_number + quantity - 1 > 9999999:
-        raise ValueError("A hétjegyű Factory sorozatszám-tartomány betelt.")
-    serials = [f"{prefix}{number:07d}" for number in range(next_number, next_number + quantity)]
-    conn.executemany(
-        "INSERT INTO battery_serials(serial,product_id,print_id,created_at) VALUES(?,?,?,?)",
-        [(serial, product_id, print_id, now) for serial in serials])
+
+def _ensure_available_battery_numbers(quantity):
+    """Reserve disjoint Central-issued numbers; cache them for offline printing."""
+    config = _factory_connection()
+    if not config or not config.get('manufacturer_code'):
+        raise ValueError('A Factory nincs aktiválva.')
+    code = config['manufacturer_code']
+    with sqlite3.connect(DATABASE, timeout=15) as db:
+        _ensure_battery_ranges(db)
+        available = db.execute('SELECT COALESCE(SUM(last_number-next_number+1),0) FROM battery_number_ranges WHERE manufacturer_code=? AND next_number<=last_number', (code,)).fetchone()[0]
+    if available >= quantity:
+        return
+    # A Central atomically reserves a unique block for this manufacturer and source.
+    result = _central_request(config, '/api/factory/v1/battery-serial-range',
+                              {'quantity': max(1000, quantity - available)}, authenticated=True)
+    first, last = int(result['first']), int(result['last'])
+    if first < 1 or last < first or last-first+1 < quantity-available:
+        raise ValueError('Érvénytelen Central számtartomány.')
+    with sqlite3.connect(DATABASE, timeout=15) as db:
+        _ensure_battery_ranges(db)
+        db.execute('INSERT INTO battery_number_ranges(manufacturer_code,next_number,last_number) VALUES(?,?,?)', (code,first,last))
+
+
+def _allocate_battery_serials(conn, product_id, print_id, quantity, now):
+    """Consume pre-reserved, nonoverlapping Central ranges in the same print transaction."""
+    config = _factory_connection() or {}
+    code = str(config.get('manufacturer_code') or '')
+    if not code.startswith('DNX-M-') or len(code[6:]) != 12:
+        raise ValueError('Érvénytelen DINEXA gyártóazonosító.')
+    _ensure_battery_ranges(conn)
+    remaining = quantity
+    numbers = []
+    for rid, nxt, last in conn.execute('SELECT id,next_number,last_number FROM battery_number_ranges WHERE manufacturer_code=? AND next_number<=last_number ORDER BY id', (code,)).fetchall():
+        take = min(remaining, last-nxt+1)
+        numbers.extend(range(nxt,nxt+take))
+        conn.execute('UPDATE battery_number_ranges SET next_number=? WHERE id=?', (nxt+take,rid))
+        remaining -= take
+        if not remaining:
+            break
+    if remaining:
+        raise ValueError('Nincs lefoglalt sorozatszám. Kapcsolódj a Centralhoz.')
+    serials = [f"BAT-{code[6:]}-F-{number:08d}" for number in numbers]
+    conn.executemany('INSERT INTO battery_serials(serial,product_id,print_id,created_at) VALUES(?,?,?,?)',
+                     [(serial,product_id,print_id,now) for serial in serials])
     return serials
 
 
@@ -873,6 +908,12 @@ def execute_print():
         return "Hibás darabszám.", 400
     if quantity < 1 or quantity > 1000:
         return "A darabszám 1 és 1000 között lehet.", 400
+
+    if _is_battery_product(product):
+        try:
+            _ensure_available_battery_numbers(quantity)
+        except Exception as exc:
+            return f"Sorozatszám-foglalás sikertelen: {exc}", 503
 
     conn = sqlite3.connect(DATABASE, timeout=15)
     cursor = conn.cursor()
