@@ -102,7 +102,7 @@ def init_db():
         if column not in existing_product_cols:
             cursor.execute(f"ALTER TABLE products ADD COLUMN {column} {declaration}")
 
-    # Egyedi akkumulátor-azonosítók: a PRN nyomtatási eseményazonosító változatlan.
+    # Egyedi akkumulátor-azonosítók; az eseményazonosító csak a naplószinkronhoz kell.
     cursor.execute("""CREATE TABLE IF NOT EXISTS battery_serials (
         serial TEXT PRIMARY KEY,
         product_id TEXT NOT NULL,
@@ -800,20 +800,29 @@ def confirm():
 
 
 
-def _is_bat_home_5(product):
-    """Csak a kért akkumulátormodellnél használjuk az új formátumot."""
-    return any(str(product[key] or "").strip().upper() == "BAT-HOME-5"
-               for key in ("product_id", "sku", "dpp_id"))
+def _is_battery_product(product):
+    """Az akkumulátorkategóriához tartozó termékek kapnak BAT-F sorozatszámot."""
+    values = [str(product[key] or "").casefold()
+              for key in ("product_name", "category_name", "sku", "product_id")]
+    return any("akkumul" in v or "battery" in v or "bat-home" in v
+               or "home 5" in v for v in values)
 
 
 def _allocate_battery_serials(conn, product_id, print_id, quantity, now):
-    """Tranzakcióban kiosztott, modellenként növekvő Factory sorozatszámok."""
-    prefix = "BAT-HOME-5-F-"
-    # Az írási zárolás a hívó BEGIN IMMEDIATE tranzakciójához tartozik.
-    previous = conn.execute(
-        "SELECT serial FROM battery_serials WHERE product_id=? "
-        "ORDER BY serial DESC LIMIT 1", (product_id,)).fetchone()
-    next_number = int(previous[0][len(prefix):]) + 1 if previous else 1
+    """Globálisan növekvő BAT-F sorszám ezen a Factory-adatbázison belül.
+
+    A BEGIN IMMEDIATE tranzakció megakadályozza a párhuzamos kiosztási ütközést.
+    A régi BAT-HOME-5-F sorozatok számait is figyelembe vesszük.
+    """
+    prefix = "BAT-F-"
+    previous_serials = conn.execute("SELECT serial FROM battery_serials").fetchall()
+    max_number = 0
+    for (old_serial,) in previous_serials:
+        if old_serial.startswith(("BAT-F-", "BAT-HOME-5-F-")):
+            suffix = old_serial.rsplit("-", 1)[-1]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+    next_number = max_number + 1
     if next_number + quantity - 1 > 9999999:
         raise ValueError("A hétjegyű Factory sorozatszám-tartomány betelt.")
     serials = [f"{prefix}{number:07d}" for number in range(next_number, next_number + quantity)]
@@ -849,12 +858,8 @@ def execute_print():
 
     now = datetime.now()
 
-    print_id = (
-        "PRN-"
-        + now.strftime("%Y%m%d-%H%M%S")
-        + "-"
-        + uuid.uuid4().hex[:4].upper()
-    )
+    # Belső eseménykulcs a Central/Portal naplózásához; nem kerül a címkére.
+    print_id = "EVT-" + uuid.uuid4().hex.upper()
 
     try:
         quantity = int(quantity)
@@ -869,7 +874,7 @@ def execute_print():
         conn.execute("BEGIN IMMEDIATE")
         serials = (_allocate_battery_serials(conn, product["product_id"], print_id,
                                              quantity, now.strftime("%Y-%m-%d %H:%M:%S"))
-                   if _is_bat_home_5(product) else [])
+                   if _is_battery_product(product) else [])
         cursor.execute("""
         INSERT INTO print_log (
             print_id,
@@ -968,6 +973,8 @@ def reprint(print_id):
             existing_serials = [row[0] for row in serial_conn.execute(
                 "SELECT serial FROM battery_serials WHERE print_id=? ORDER BY serial",
                 (original_print["print_id"],)).fetchall()]
+        if not existing_serials and str(original_print["category"] or "").casefold().find("akkumul") >= 0:
+            return "A régi akkumulátornyomtatáshoz nincs egyedi sorozatszám; nem nyomtatható újra.", 409
         if existing_serials and quantity > len(existing_serials):
             return "Az eredeti sorozatszámok számánál több címke nem nyomtatható újra.", 400
 

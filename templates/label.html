@@ -49,7 +49,7 @@
                 <div class="label-prn">{{ serial }}</div>
             </div>
             {% endfor %}
-            <p>Nyomtatási napló azonosítója: {{ print_id }}</p>
+
         {% else %}
             <div class="label-preview">
                 <img src="{{ url_for('factory_qr', filename=qr_filename) }}" alt="DPP QR-kód">
