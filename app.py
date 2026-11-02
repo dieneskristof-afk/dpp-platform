@@ -21,8 +21,20 @@ app.secret_key = os.environ.get("DINEXA_FACTORY_SECRET_KEY", "dpp-demo-secret-ke
 # A futásidejű adatok a Render tartós lemezére kerülnek, ha
 # DINEXA_FACTORY_DATA_DIR=/var/data/factory van beállítva.
 # A forráskódban nincsenek gyártóspecifikus alapadatok.
-FACTORY_DATA_DIR = Path(os.environ.get("DINEXA_FACTORY_DATA_DIR", str(Path(__file__).resolve().parent / ".factory_runtime")))
+# Renderen a csatolt Persistent Disk az elsődleges adatforrás akkor is, ha
+# a környezeti változó véletlenül kimaradt. Helyben marad a fejlesztői mappa.
+_configured_data_dir = os.environ.get("DINEXA_FACTORY_DATA_DIR", "").strip()
+_render_disk_dir = Path("/var/data/factory")
+if _configured_data_dir:
+    FACTORY_DATA_DIR = Path(_configured_data_dir)
+elif _render_disk_dir.is_dir():
+    FACTORY_DATA_DIR = _render_disk_dir
+elif os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"):
+    raise RuntimeError("A Factory Render Persistent Disk nem található: /var/data/factory. A tartós adatok védelmében az alkalmazás nem indul ideiglenes adatbázissal.")
+else:
+    FACTORY_DATA_DIR = Path(__file__).resolve().parent / ".factory_runtime"
 FACTORY_DATA_DIR.mkdir(parents=True, exist_ok=True)
+logging.getLogger("dinexa.factory.storage").warning("Factory adatkönyvtár: %s", FACTORY_DATA_DIR)
 DATABASE = str(FACTORY_DATA_DIR / "dpp_factory.db")
 QR_DATA_DIR = FACTORY_DATA_DIR / "qr"
 QR_DATA_DIR.mkdir(parents=True, exist_ok=True)
