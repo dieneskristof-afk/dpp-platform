@@ -814,12 +814,47 @@ def confirm():
 
 
 
-def _is_battery_product(product):
-    """Az akkumulátorkategóriához tartozó termékek kapnak BAT-F sorozatszámot."""
-    values = [str(product[key] or "").casefold()
-              for key in ("product_name", "category_name", "sku", "product_id")]
-    return any("akkumul" in v or "battery" in v or "bat-home" in v
-               or "home 5" in v for v in values)
+def _is_battery_product(product, conn):
+    """BAT-F azonosító jár minden akkumulátor-kategória alá sorolt terméknek.
+
+    A Centralban a termék közvetlen kategóriája lehet pl. "Home" vagy "EV",
+    miközben az "akkumulátor" szó csak a szülő kategóriában szerepel.
+    Ezért a teljes, gyártóhoz tartozó kategória-ágat ellenőrizzük.
+    """
+    def battery_name(value):
+        value = str(value or "").casefold()
+        return "akkumul" in value or "battery" in value or "bat-home" in value
+
+    if battery_name(product["category_name"]):
+        return True
+
+    config = _factory_connection() or {}
+    manufacturer_id = config.get("manufacturer_id")
+    category_id = product["central_category_id"]
+    visited = set()
+    while manufacturer_id is not None and category_id is not None:
+        try:
+            category_id = int(category_id)
+        except (ValueError, TypeError):
+            break
+        if category_id in visited:
+            break  # Sérült / körkörös kategóriahierarchia esetén nincs végtelen ciklus.
+        visited.add(category_id)
+        category = conn.execute(
+            "SELECT name, parent_id FROM synced_categories WHERE id=? AND manufacturer_id=?",
+            (category_id, manufacturer_id),
+        ).fetchone()
+        if category is None:
+            break
+        if battery_name(category[0]):
+            return True
+        category_id = category[1]
+
+    # Régebbi, még nem teljesen kategorizált termékeknél a kifejezetten
+    # akkumulátorra utaló név továbbra is működik. A korábbi Home 5
+    # kompatibilitási szabályát sem szüntetjük meg.
+    product_name = str(product["product_name"] or "").casefold()
+    return battery_name(product_name) or "home 5" in product_name
 
 
 def _allocate_battery_serials(conn, product_id, print_id, quantity, now):
@@ -900,7 +935,7 @@ def execute_print():
         conn.execute("BEGIN IMMEDIATE")
         serials = (_allocate_battery_serials(conn, product["product_id"], print_id,
                                              quantity, now.strftime("%Y-%m-%d %H:%M:%S"))
-                   if _is_battery_product(product) else [])
+                   if _is_battery_product(product, conn) else [])
         cursor.execute("""
         INSERT INTO print_log (
             print_id,
