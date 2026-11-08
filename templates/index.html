@@ -24,7 +24,7 @@
 
 <body>
 
-<div class="app">
+<div class="app factory-home">
 
     <header>
         <div class="dinexa-factory-brand">
@@ -87,18 +87,32 @@
         <h2>Termékkatalógus</h2></div></div>
         <div class="factory-catalog-toolbar"><input type="search" id="catalogSearch" placeholder="Kategória vagy termék keresése..."></div>
         <div class="factory-catalog-layout">
-            <aside class="factory-catalog-sidebar"><h3>Kategóriák</h3><div id="categoryTree"></div></aside>
+            <aside class="factory-catalog-sidebar" aria-label="Termékkategóriák">
+                <h3>Kategóriák</h3>
+                <div id="categoryTree" class="factory-scroll-area"></div>
+            </aside>
             <div class="factory-catalog-main">
                 <p class="section-label">KIVÁLASZTOTT KATEGÓRIA</p>
-                <h3 id="selectedTitle">Összes termék</h3><p class="factory-muted" id="selectedPath"></p>
+                <h3 id="selectedTitle">Válassz kategóriát</h3>
+                <p class="factory-muted" id="selectedPath"></p>
                 <h4>Termékek <span id="productCount"></span></h4>
-                <div id="productList"></div>
-                <div id="selectedDpp" class="factory-selected-dpp" hidden>
-                    <img id="selectedQr" alt="Central által generált DPP QR-kód">
-                    <div><strong id="selectedProductName"></strong><p id="selectedVersion" class="factory-muted"></p>
-                    <a id="printDpp" class="dpp-button factory-print-link" href="#">DPP NYOMTATÁS</a></div>
-                </div>
+                <div id="productList" class="factory-scroll-area" aria-label="Termékek listája"></div>
             </div>
+            <aside class="factory-catalog-print" aria-label="DPP nyomtatási panel">
+                <p class="section-label">KIVÁLASZTOTT TERMÉK</p>
+                <h3>DPP nyomtatás</h3>
+                <div id="factoryPrintPlaceholder" class="factory-print-placeholder" role="status">
+                    <span class="factory-print-placeholder-icon" aria-hidden="true">▦</span>
+                    <strong>Még nincs kiválasztott termék</strong>
+                    <p>Válassz egy kategóriát, majd egy terméket a középső listából.</p>
+                </div>
+                <div id="selectedDpp" class="factory-selected-dpp" hidden>
+                    <strong id="selectedProductName" class="factory-selected-name"></strong>
+                    <p id="selectedVersion" class="factory-muted"></p>
+                    <img id="selectedQr" alt="Central által generált DPP QR-kód">
+                    <a id="printDpp" class="dpp-button factory-print-link" href="#">DPP NYOMTATÁS</a>
+                </div>
+            </aside>
         </div>
         {% if not catalog_products %}<p class="sync-time">Még nincs szinkronizált, publikált DPP. Az adatok automatikusan frissülnek.</p>{% endif %}
     </section>
@@ -111,21 +125,51 @@
     </footer>
 </div>
 <style>
-.factory-catalog-toolbar{margin:20px 0}.factory-catalog-toolbar input{width:100%;box-sizing:border-box;padding:13px;border:1px solid #d8e0e9;border-radius:8px;font-size:15px}
-.factory-catalog-layout{display:grid;grid-template-columns:minmax(220px,34%) minmax(0,1fr);gap:18px}
-.factory-catalog-sidebar,.factory-catalog-main{border:1px solid #e2e8f0;border-radius:12px;padding:20px;min-width:0}
-.factory-catalog-sidebar{background:#f8fafc;max-height:650px;overflow:auto}
-.factory-catalog-sidebar h3,.factory-catalog-main h3{margin:0 0 15px}
-.factory-tree-row{display:flex;align-items:center;border-radius:7px;padding:4px 6px;gap:5px}
+/* Csak a Factory kezdőoldala szélesebb: a többi munkafolyamat változatlan. */
+.factory-home{max-width:1480px}
+.factory-catalog-toolbar{margin:20px 0}
+.factory-catalog-toolbar input{width:100%;box-sizing:border-box;padding:14px;border:1px solid #d8e0e9;border-radius:8px;font-size:16px}
+.factory-catalog-layout{display:grid;grid-template-columns:minmax(0,25fr) minmax(0,35fr) minmax(0,40fr);gap:16px;align-items:start}
+.factory-catalog-sidebar,.factory-catalog-main,.factory-catalog-print{border:1px solid #e2e8f0;border-radius:12px;padding:18px;min-width:0;background:#fff}
+.factory-catalog-sidebar{background:#f8fafc}
+.factory-catalog-sidebar h3,.factory-catalog-main h3,.factory-catalog-print h3{margin:0 0 15px}
+.factory-catalog-main h4{margin:16px 0 10px}
+.factory-catalog-main .section-label,.factory-catalog-print .section-label{font-size:11px}
+.factory-scroll-area{max-height:clamp(300px,55vh,610px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.factory-tree-row{display:flex;align-items:center;border-radius:7px;padding:4px 3px;gap:3px}
 .factory-tree-row:hover{background:#e7f4f6}.factory-tree-row.selected{background:#d9f1f4}
-.factory-tree-toggle,.factory-tree-name{background:none;border:0;cursor:pointer;color:#18273d;text-align:left}
-.factory-tree-toggle{width:20px;flex:none}.factory-tree-name{flex:1;padding:7px 2px;min-width:0}
-.factory-muted{color:#74849a;font-size:13px}.factory-product{border-bottom:1px solid #e2e8f0;padding:14px 0;display:block;width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left;cursor:pointer;color:#008c9e}
-.factory-product small{display:block;color:#74849a;margin-top:7px}.factory-product.selected{background:#e7f4f6;border-radius:6px;padding-left:10px}
-.factory-selected-dpp{border-top:1px solid #e2e8f0;margin-top:20px;padding-top:20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-.factory-selected-dpp[hidden]{display:none}.factory-selected-dpp img{width:135px;height:135px;object-fit:contain;border:1px solid #e2e8f0;border-radius:8px}
-.factory-print-link{display:inline-block;text-align:center;text-decoration:none;padding:13px 22px;margin-top:12px;box-sizing:border-box}
-@media(max-width:700px){.factory-catalog-layout{grid-template-columns:1fr}}
+.factory-tree-toggle,.factory-tree-name{background:none;border:0;cursor:pointer;color:#18273d;text-align:left;min-height:42px;font-size:14px}
+.factory-tree-toggle{width:27px;flex:none;font-size:17px}.factory-tree-name{flex:1;padding:7px 2px;min-width:0;overflow-wrap:anywhere}
+.factory-muted{color:#74849a;font-size:13px;line-height:1.5}
+.factory-product{border-bottom:1px solid #e2e8f0;padding:13px 10px;display:block;width:100%;min-height:60px;background:none;border-left:0;border-right:0;border-top:0;text-align:left;cursor:pointer;color:#008c9e;border-radius:6px;overflow-wrap:anywhere}
+.factory-product:hover{background:#f1f8fa}.factory-product:focus-visible,.factory-tree-name:focus-visible,.factory-tree-toggle:focus-visible,.factory-print-link:focus-visible{outline:3px solid #0b8999;outline-offset:2px}
+.factory-product small{display:block;color:#74849a;margin-top:6px;line-height:1.4}.factory-product.selected{background:#e2f2f5}
+.factory-catalog-print{position:sticky;top:16px;text-align:center}
+.factory-catalog-print .section-label,.factory-catalog-print h3{text-align:left}
+.factory-print-placeholder[hidden]{display:none}.factory-print-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;min-height:235px;color:#56677a;padding:14px}
+.factory-print-placeholder p{font-size:13px;line-height:1.5;margin:0}.factory-print-placeholder-icon{font-size:40px;color:#9babb9}
+.factory-selected-dpp{display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:10px}
+.factory-selected-dpp[hidden]{display:none}
+.factory-selected-name{font-size:19px;overflow-wrap:anywhere}
+.factory-selected-dpp .factory-muted{margin:0 0 4px}
+.factory-selected-dpp img{width:clamp(125px,16vw,195px);height:clamp(125px,16vw,195px);max-width:100%;object-fit:contain;border:1px solid #e2e8f0;border-radius:8px;background:#fff}
+.factory-print-link{display:block;width:100%;text-align:center;text-decoration:none;padding:16px 12px;margin-top:10px;box-sizing:border-box;background:#11899b;color:#fff;font-size:17px;line-height:1.3}
+.factory-print-link:hover{background:#087a8c}
+@media(max-width:960px){
+    .factory-catalog-layout{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr)}
+    .factory-catalog-print{grid-column:1/-1;position:static}
+    .factory-selected-dpp{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;text-align:left}
+    .factory-selected-dpp img{grid-column:2;grid-row:1/4;width:125px;height:125px}
+    .factory-print-link{grid-column:1/-1}
+}
+@media(max-width:620px){
+    .factory-catalog-layout{grid-template-columns:minmax(0,1fr)}
+    .factory-catalog-print{grid-column:auto}
+    .factory-scroll-area{max-height:320px}
+    .factory-selected-dpp{display:flex;text-align:center}
+    .factory-selected-dpp img{width:145px;height:145px}
+    .factory-catalog-sidebar,.factory-catalog-main,.factory-catalog-print{padding:15px}
+}
 </style>
 <script>
 const categories = {{ catalog_categories | tojson }};
@@ -137,8 +181,45 @@ const productList=document.getElementById('productList');
 function getChildren(parent){return categories.filter(c=>c.parent_id===parent).sort((a,b)=>a.name.localeCompare(b.name,'hu'))}
 function pathOf(id){let names=[],seen=new Set(),c=categoryMap.get(id);while(c&&!seen.has(c.id)){seen.add(c.id);names.unshift(c.name);c=categoryMap.get(c.parent_id)}return names.join(' → ')}
 function categoryMatches(c,seen=new Set()){if(seen.has(c.id))return false;seen.add(c.id);return !searchText||c.name.toLocaleLowerCase('hu').includes(searchText)||products.some(p=>p.central_category_id===c.id&&(p.product_name.toLocaleLowerCase('hu').includes(searchText)||(p.sku||'').toLocaleLowerCase('hu').includes(searchText)))||getChildren(c.id).some(child=>categoryMatches(child,new Set(seen)))}
-function renderTree(){tree.replaceChildren();const visited=new Set();function branch(parent,depth){getChildren(parent).forEach(c=>{if(visited.has(c.id))return;visited.add(c.id);if(!categoryMatches(c))return;const row=document.createElement('div');row.className='factory-tree-row'+(selectedId===c.id?' selected':'');row.style.paddingLeft=(depth*15+5)+'px';const children=getChildren(c.id);const toggle=document.createElement('button');toggle.type='button';toggle.className='factory-tree-toggle';toggle.textContent=children.length?(expanded.has(c.id)?'▾':'▸'):'·';toggle.onclick=()=>{expanded.has(c.id)?expanded.delete(c.id):expanded.add(c.id);renderTree()};const name=document.createElement('button');name.type='button';name.className='factory-tree-name';name.textContent='📁 '+c.name;name.onclick=()=>{selectedId=c.id;selectedProduct=null;renderAll()};row.append(toggle,name);tree.append(row);if(searchText||expanded.has(c.id))branch(c.id,depth+1)})}branch(null,0);categories.forEach(c=>{if(!visited.has(c.id)&&!categoryMap.has(c.parent_id))branch(c.parent_id,0)})}
-function renderProducts(){productList.replaceChildren();document.getElementById('selectedTitle').textContent=categoryMap.get(selectedId)?.name||'Összes termék';document.getElementById('selectedPath').textContent=selectedId===null?'':pathOf(selectedId);const visible=products.filter(p=>(selectedId===null||p.central_category_id===selectedId)&&(!searchText||p.product_name.toLocaleLowerCase('hu').includes(searchText)||(p.sku||'').toLocaleLowerCase('hu').includes(searchText)));document.getElementById('productCount').textContent='('+visible.length+')';if(!visible.length){const empty=document.createElement('p');empty.className='factory-muted';empty.textContent='Nincs megjeleníthető, publikált DPP.';productList.append(empty)}visible.forEach(p=>{const btn=document.createElement('button');btn.type='button';btn.className='factory-product'+(selectedProduct===p.product_id?' selected':'');const name=document.createElement('strong');name.textContent=p.product_name;const detail=document.createElement('small');detail.textContent='Cikkszám: '+(p.sku||'Nincs megadva')+' · DPP v'+p.dpp_version;btn.append(name,detail);btn.onclick=()=>{selectedProduct=p.product_id;renderProducts()};productList.append(btn)});const selected=visible.find(p=>p.product_id===selectedProduct);const panel=document.getElementById('selectedDpp');panel.hidden=!selected;if(selected){document.getElementById('selectedProductName').textContent=selected.product_name;document.getElementById('selectedVersion').textContent='Publikált DPP · v'+selected.dpp_version;document.getElementById('selectedQr').src={{ url_for('factory_qr', filename='__QR_FILENAME__') | tojson }}.replace('__QR_FILENAME__', encodeURIComponent(selected.qr_file));document.getElementById('printDpp').href={{ url_for('print_page') | tojson }}+'?product_id='+encodeURIComponent(selected.product_id)}}
+function renderTree(){tree.replaceChildren();const visited=new Set();function branch(parent,depth){getChildren(parent).forEach(c=>{if(visited.has(c.id))return;visited.add(c.id);if(!categoryMatches(c))return;const row=document.createElement('div');row.className='factory-tree-row'+(selectedId===c.id?' selected':'');row.style.paddingLeft=(depth*15+5)+'px';const children=getChildren(c.id);const toggle=document.createElement('button');toggle.type='button';toggle.className='factory-tree-toggle';toggle.textContent=children.length?(expanded.has(c.id)?'▾':'▸'):'·';toggle.onclick=()=>{expanded.has(c.id)?expanded.delete(c.id):expanded.add(c.id);renderTree()};const name=document.createElement('button');name.type='button';name.className='factory-tree-name';name.textContent='📁 '+c.name;name.onclick=()=>{selectedId=c.id;selectedProduct=null;searchText='';document.getElementById('catalogSearch').value='';renderAll()};row.append(toggle,name);tree.append(row);if(searchText||expanded.has(c.id))branch(c.id,depth+1)})}branch(null,0);categories.forEach(c=>{if(!visited.has(c.id)&&!categoryMap.has(c.parent_id))branch(c.parent_id,0)})}
+function descendantIds(id){const ids=new Set([id]);let changed=true;while(changed){changed=false;categories.forEach(c=>{if(ids.has(c.parent_id)&&!ids.has(c.id)){ids.add(c.id);changed=true}})}return ids}
+function renderProducts(){
+    productList.replaceChildren();
+    const title=document.getElementById('selectedTitle');
+    title.textContent=searchText?'Keresési találatok':(categoryMap.get(selectedId)?.name||'Válassz kategóriát');
+    document.getElementById('selectedPath').textContent=searchText?'':(selectedId===null?'':pathOf(selectedId));
+    const categoryIds=selectedId===null?null:descendantIds(selectedId);
+    const visible=products.filter(p=>{
+        if(searchText)return p.product_name.toLocaleLowerCase('hu').includes(searchText)||(p.sku||'').toLocaleLowerCase('hu').includes(searchText)||pathOf(p.central_category_id).toLocaleLowerCase('hu').includes(searchText);
+        return categoryIds!==null&&categoryIds.has(p.central_category_id);
+    });
+    document.getElementById('productCount').textContent='('+visible.length+')';
+    if(!visible.length){
+        const empty=document.createElement('p');empty.className='factory-muted';
+        empty.textContent=!searchText&&selectedId===null?'Válassz kategóriát a bal oldali listából, vagy keress termékre.':'Nincs megjeleníthető, publikált DPP.';
+        productList.append(empty);
+    }
+    visible.forEach(p=>{
+        const btn=document.createElement('button');btn.type='button';
+        btn.className='factory-product'+(selectedProduct===p.product_id?' selected':'');
+        btn.setAttribute('aria-pressed',String(selectedProduct===p.product_id));
+        const name=document.createElement('strong');name.textContent=p.product_name;
+        const detail=document.createElement('small');detail.textContent='Cikkszám: '+(p.sku||'Nincs megadva')+' · DPP v'+p.dpp_version;
+        btn.append(name,detail);
+        btn.onclick=()=>{selectedProduct=p.product_id;renderProducts()};
+        productList.append(btn);
+    });
+    const selected=visible.find(p=>p.product_id===selectedProduct);
+    const panel=document.getElementById('selectedDpp');
+    panel.hidden=!selected;
+    document.getElementById('factoryPrintPlaceholder').hidden=!!selected;
+    if(selected){
+        document.getElementById('selectedProductName').textContent=selected.product_name;
+        document.getElementById('selectedVersion').textContent='Publikált DPP · v'+selected.dpp_version;
+        document.getElementById('selectedQr').src={{ url_for('factory_qr', filename='__QR_FILENAME__') | tojson }}.replace('__QR_FILENAME__', encodeURIComponent(selected.qr_file));
+        document.getElementById('printDpp').href={{ url_for('print_page') | tojson }}+'?product_id='+encodeURIComponent(selected.product_id);
+    }
+}
 function renderAll(){renderTree();renderProducts()}
 document.getElementById('catalogSearch').addEventListener('input',e=>{searchText=e.target.value.trim().toLocaleLowerCase('hu');renderAll()});renderAll();
 </script>
