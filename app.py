@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, abort
+from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, abort, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 import uuid
@@ -1186,6 +1186,71 @@ def search_print():
         searched=searched,
         history=history
     )
+
+
+
+# DINEXA partner-adatexport (Central által kezdeményezett, titkosított kapcsolat)
+import hmac as _dinexa_hmac
+import zipfile as _dinexa_zipfile
+import io as _dinexa_io
+from datetime import datetime as _dinexa_datetime, timezone as _dinexa_timezone
+
+def _dinexa_export_authorized():
+    secret = os.environ.get('DINEXA_EXPORT_API_KEY', '')
+    provided = request.headers.get('X-Dinexa-Export-Key', '')
+    return bool(secret and provided and _dinexa_hmac.compare_digest(secret, provided))
+
+def _dinexa_rows_for_partner(db_path, mid, factory=False):
+    payload = {}
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        for (table,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
+            if not table.replace('_','').isalnum():
+                continue
+            columns = [r[1] for r in conn.execute('PRAGMA table_info("' + table + '")')]
+            if 'manufacturer_id' in columns:
+                rows = conn.execute('SELECT * FROM "' + table + '" WHERE manufacturer_id=?', (mid,)).fetchall()
+            elif factory:
+                # A Factory egy aktivált gyártóhoz tartozó, önálló adatbázis.
+                rows = conn.execute('SELECT * FROM "' + table + '"').fetchall()
+            else:
+                continue  # Nem bizonyíthatóan partnerhez tartozó adatok kimaradnak.
+            result=[]
+            for row in rows:
+                obj={}
+                for key in row.keys():
+                    value=row[key]
+                    if isinstance(value, bytes):
+                        import base64
+                        value={'base64':base64.b64encode(value).decode('ascii')}
+                    obj[key]=value
+                result.append(obj)
+            payload[table]=result
+    return payload
+
+def _dinexa_export_response(mid, tables, service, extra_files=None):
+    stream=_dinexa_io.BytesIO()
+    with _dinexa_zipfile.ZipFile(stream,'w',compression=_dinexa_zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('manifest.json',json.dumps({'service':service,'manufacturer_id':mid,'exported_at':_dinexa_datetime.now(_dinexa_timezone.utc).isoformat(),'tables':list(tables)},ensure_ascii=False,indent=2))
+        archive.writestr('adatok.json',json.dumps(tables,ensure_ascii=False,indent=2))
+        for name,path in (extra_files or []):
+            if path.is_file(): archive.write(path,name)
+    stream.seek(0)
+    return send_file(stream,mimetype='application/zip',as_attachment=True,download_name=f'DINEXA_{service}_{mid}_adatok.zip')
+
+@app.route('/api/dinexa/internal/partner-export/<int:mid>',methods=['GET'])
+def dinexa_factory_partner_export(mid):
+    if not _dinexa_export_authorized(): return ('Unauthorized',401)
+    config=_factory_connection()
+    if not config or int(config.get('manufacturer_id',-1)) != mid:
+        return ('A Factory nincs ehhez a partnerhez aktiválva.',404)
+    tables=_dinexa_rows_for_partner(DATABASE,mid,factory=True)
+    extra=[]
+    for base in (QR_DATA_DIR,):
+        if base.exists():
+            for file in base.rglob('*'):
+                if file.is_file() and not file.is_symlink(): extra.append(('qr/'+str(file.relative_to(base)),file))
+    return _dinexa_export_response(mid,tables,'Factory',extra)
 
 
 if __name__ == "__main__":
