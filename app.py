@@ -1253,6 +1253,91 @@ def dinexa_factory_partner_export(mid):
     return _dinexa_export_response(mid,tables,'Factory',extra)
 
 
+
+# DINEXA partneradat-visszaállítás (Central -> alkalmazás)
+@app.route('/api/dinexa/internal/partner-import/<int:mid>', methods=['POST'])
+def dinexa_partner_import(mid):
+    if not _dinexa_export_authorized(): return ('Unauthorized', 401)
+    import base64 as _b64
+    from pathlib import PurePosixPath
+    from werkzeug.exceptions import RequestEntityTooLarge
+    if request.content_length and request.content_length > 100 * 1024 * 1024:
+        return ('A ZIP túl nagy (maximum 100 MB).', 413)
+    payload = request.get_data(cache=False)
+    if len(payload) > 100 * 1024 * 1024: return ('A ZIP túl nagy.', 413)
+    try:
+        with _dinexa_zipfile.ZipFile(_dinexa_io.BytesIO(payload)) as z:
+            members = z.infolist()
+            if len(members) > 10000 or sum(x.file_size for x in members) > 300 * 1024 * 1024:
+                return ('A mentés túl nagy.', 413)
+            if len({x.filename for x in members}) != len(members):
+                return ('Ismétlődő fájlnév.', 400)
+            manifest = json.loads(z.read('manifest.json'))
+            if manifest.get('service') != 'Factory' or manifest.get('manufacturer_id') != mid:
+                return ('A mentés nem ehhez a partnerhez vagy alkalmazáshoz tartozik.', 400)
+            tables = json.loads(z.read('adatok.json'))
+            if not isinstance(tables, dict) or not all(isinstance(v,list) for v in tables.values()):
+                return ('Hibás adatszerkezet.', 400)
+            if set(manifest.get('tables',[])) != set(tables):
+                return ('A mentés táblalistája hibás.',400)
+            qr_files = []
+            for item in members:
+                if item.filename in ('manifest.json','adatok.json'): continue
+                if 'Factory' != 'Factory': return ('Ismeretlen fájl a mentésben.',400)
+                path=PurePosixPath(item.filename)
+                if item.is_dir(): continue
+                if not item.filename.startswith('qr/') or path.is_absolute() or '..' in path.parts or len(path.parts)<2:
+                    return ('Érvénytelen QR-fájlnév.',400)
+                qr_files.append((path, z.read(item)))
+    except (ValueError, KeyError, OSError, _dinexa_zipfile.BadZipFile, UnicodeDecodeError, TypeError) as exc:
+        return ('Érvénytelen ZIP-mentés.',400)
+    if 'Factory' == 'Factory':
+        config = _factory_connection()
+        if not config or int(config.get('manufacturer_id',-1)) != mid:
+            return ('A Factory nem ehhez a partnerhez van aktiválva.',404)
+    db_path = DATABASE if 'Factory' == 'Factory' else DB_PATH
+    try:
+        with sqlite3.connect(db_path, timeout=30) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            for table, rows in tables.items():
+                if not table.replace('_','').isalnum(): raise ValueError('Érvénytelen tábla')
+                info=conn.execute('PRAGMA table_info("'+table+'")').fetchall()
+                if not info: raise ValueError('Hiányzó tábla: '+table)
+                cols=[x[1] for x in info]
+                if 'Factory' == 'Portal' and 'manufacturer_id' not in cols:
+                    raise ValueError('Nem partnerhez kötött tábla: '+table)
+                for row in rows:
+                    if not isinstance(row,dict) or set(row)!=set(cols): raise ValueError('Eltérő táblaoszlopok: '+table)
+                    if 'manufacturer_id' in cols and row.get('manufacturer_id') != mid:
+                        raise ValueError('Másik partner adatai: '+table)
+                if 'Factory' == 'Portal':
+                    conn.execute('DELETE FROM "'+table+'" WHERE manufacturer_id=?',(mid,))
+                else:
+                    conn.execute('DELETE FROM "'+table+'"')
+                if rows:
+                    marks=','.join('?' for _ in cols)
+                    colnames=','.join('"'+c+'"' for c in cols)
+                    values=[]
+                    for row in rows:
+                        vals=[]
+                        for col in cols:
+                            val=row[col]
+                            if isinstance(val,dict) and set(val)=={'base64'}:
+                                val=_b64.b64decode(val['base64'],validate=True)
+                            vals.append(val)
+                        values.append(vals)
+                    conn.executemany('INSERT INTO "'+table+'" ('+colnames+') VALUES ('+marks+')',values)
+            conn.commit()
+        if 'Factory' == 'Factory':
+            for path,data in qr_files:
+                target=QR_DATA_DIR.joinpath(*path.parts[1:])
+                target.parent.mkdir(parents=True,exist_ok=True)
+                target.write_bytes(data)
+        return jsonify({'ok':True,'tables':len(tables),'rows':sum(len(v) for v in tables.values())})
+    except (sqlite3.Error, ValueError, TypeError, _b64.binascii.Error) as exc:
+        app.logger.exception('DINEXA partnerimport sikertelen')
+        return ('Nem sikerült visszaállítani a mentést: '+str(exc),400)
+
 if __name__ == "__main__":
     init_db()
     app.run(debug=True, port=5001)
